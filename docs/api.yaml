@@ -1,0 +1,74 @@
+openapi: 3.0.3
+info:
+  title: FollowingFeed API
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080/api/v1
+paths:
+  /users/signup:
+    post:
+      summary: 注册用户
+      responses: {"200": {description: OK}}
+  /users/login:
+    post:
+      summary: 邮箱密码登录
+      responses: {"200": {description: OK}}
+  /users/profile:
+    get:
+      summary: 获取当前用户资料
+      security: [{bearerAuth: []}]
+      responses: {"200": {description: OK}}
+  /users/refreshToken:
+    post:
+      summary: 刷新访问令牌
+      security: [{bearerAuth: []}]
+      responses: {"200": {description: OK}}
+  /users/logout:
+    post:
+      summary: 注销当前会话
+      security: [{bearerAuth: []}]
+      responses: {"200": {description: OK}}
+  /articles/edit:
+    post:
+      summary: 保存草稿
+      security: [{bearerAuth: []}]
+      responses: {"200": {description: OK}}
+  /articles/publish:
+    post:
+      summary: 发布文章
+      security: [{bearerAuth: []}]
+      responses: {"200": {description: OK}}
+  /articles/withdraw:
+    post:
+      summary: 撤回文章
+      security: [{bearerAuth: []}]
+      responses: {"200": {description: OK}}
+  /articles/delete:
+    post:
+      summary: 删除文章
+      security: [{bearerAuth: []}]
+      responses: {"200": {description: OK}}
+  /articles/list:
+    get:
+      summary: 获取当前用户文章列表
+      security: [{bearerAuth: []}]
+      responses: {"200": {description: OK}}
+  /articles/detail/{id}:
+    get:
+      summary: 获取当前用户的一篇文章
+      security: [{bearerAuth: []}]
+      responses: {"200": {description: OK}, "403": {description: Forbidden}}
+  /pub/list:
+    get:
+      summary: 获取公开文章列表
+      responses: {"200": {description: OK}}
+  /pub/detail/{id}:
+    get:
+      summary: 获取公开文章详情
+      responses: {"200": {description: OK}}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

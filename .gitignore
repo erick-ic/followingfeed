@@ -1,0 +1,11 @@
+.env*
+!.env.example
+config/*.yaml
+!config/dev.example.yaml
+.idea/
+.DS_Store
+bin/
+coverage.out
+
+web/node_modules/
+web/.next/

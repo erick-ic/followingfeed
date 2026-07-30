@@ -1,0 +1,9 @@
+.git/
+.env
+.idea/
+.DS_Store
+bin/
+coverage.out
+config/dev.yaml
+web/node_modules/
+web/.next/

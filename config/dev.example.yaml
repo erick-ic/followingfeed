@@ -1,0 +1,17 @@
+env: development
+
+server:
+  addr: ":8080"
+
+mysql:
+  host: "localhost"
+  port: "13306"
+  user: "followingfeed"
+  database: "followingfeed"
+
+redis:
+  addr: "localhost:6379"
+
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
