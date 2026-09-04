@@ -18,7 +18,7 @@ type Migration struct {
 func All() ([]Migration, error) {
 	entries, err := files.ReadDir(".")
 	if err != nil {
-		return nil, fmt.Errorf("read embedded migrations: %w", err)
+		return nil, fmt.Errorf("读取内嵌迁移文件失败：%w", err)
 	}
 	res := make([]Migration, 0, len(entries))
 	for _, entry := range entries {
@@ -27,7 +27,7 @@ func All() ([]Migration, error) {
 		}
 		script, err := files.ReadFile(entry.Name())
 		if err != nil {
-			return nil, fmt.Errorf("read migration %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("读取迁移文件 %s 失败：%w", entry.Name(), err)
 		}
 		res = append(res, Migration{
 			Version: strings.TrimSuffix(entry.Name(), ".sql"),

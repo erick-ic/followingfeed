@@ -37,7 +37,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 Following<span>Feed</span>
               </span>
               <span>记录技术，也关注创造技术的人。</span>
-              <span>© {new Date().getFullYear()}</span>
+              <span>Copyright © {new Date().getFullYear()}</span>
             </div>
           </footer>
         </Providers>

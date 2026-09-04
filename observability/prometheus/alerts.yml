@@ -1,0 +1,79 @@
+groups:
+  - name: followingfeed-api
+    rules:
+      - alert: FollowingFeedTargetDown
+        expr: up{job="followingfeed-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: FollowingFeed metrics target is unavailable
+
+      - alert: FollowingFeedHighHTTPErrorRate
+        expr: |
+          (
+            sum(rate(followingfeed_http_server_requests_total{status_code=~"5.."}[5m]))
+            /
+            sum(rate(followingfeed_http_server_requests_total[5m]))
+          ) > 0.01
+          and sum(rate(followingfeed_http_server_requests_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: FollowingFeed HTTP 5xx rate is above 1 percent
+
+      - alert: FollowingFeedHighHTTPP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(followingfeed_http_server_request_duration_seconds_bucket[5m]))
+          ) > 0.5
+          and sum(rate(followingfeed_http_server_requests_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: FollowingFeed HTTP p95 latency is above 500 milliseconds
+
+      - alert: FollowingFeedDBPoolSaturation
+        expr: |
+          go_sql_max_open_connections{db_name="mysql"} > 0
+          and
+          go_sql_in_use_connections{db_name="mysql"}
+          / go_sql_max_open_connections{db_name="mysql"} > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: FollowingFeed database connection pool is over 80 percent utilized
+
+      - alert: FollowingFeedRecoveredPanic
+        expr: increase(followingfeed_http_server_panics_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: FollowingFeed recovered an HTTP handler panic
+
+      - alert: FollowingFeedSlowDatabaseOperation
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, operation, table) (
+              rate(followingfeed_db_operation_duration_seconds_bucket[5m])
+            )
+          ) > 0.1
+          and on() sum(rate(followingfeed_db_operation_duration_seconds_count[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: FollowingFeed database {{ $labels.operation }} on {{ $labels.table }} p95 is above 100 milliseconds
+
+      - alert: FollowingFeedCacheErrors
+        expr: sum(rate(followingfeed_cache_operations_total{result="error"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: FollowingFeed business cache operations are failing

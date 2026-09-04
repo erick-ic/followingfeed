@@ -48,7 +48,7 @@ func (ud *GORMUserDAO) Insert(ctx context.Context, u domain.User) error {
 	if mysqlErr, ok := err.(*mysql.MySQLError); ok {
 		const uniqueConflictsErrNo uint16 = 1062
 		if mysqlErr.Number == uniqueConflictsErrNo {
-			//唯一索引冲突，即邮箱/手机号冲突
+			//唯一索引冲突，即邮箱冲突
 			return ErrUserDuplicated
 		}
 	}
@@ -64,9 +64,9 @@ func NewGORMUserDAO(db *gorm.DB) UserDAO {
 // User 数据库表结构
 // 别称entity、model、PO(persistent object)
 type User struct {
-	Id       int            `gorm:"primaryKey, autoIncrement"`
-	Nickname string         `gorm:"type:varchar(24);not null;default:技术旅人"`
-	Email    sql.NullString `gorm:"unique"`
+	Id       int `gorm:"primaryKey;autoIncrement"`
+	Nickname string
+	Email    sql.NullString
 	Password string
 	//创建时间，毫秒数
 	CreatedAt int64

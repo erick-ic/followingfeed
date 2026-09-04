@@ -6,6 +6,9 @@ config/*.yaml
 .DS_Store
 bin/
 coverage.out
+.local/
 
 web/node_modules/
 web/.next/
+/followingfeed
+docs/performance-records/

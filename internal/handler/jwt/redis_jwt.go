@@ -1,11 +1,15 @@
 package jwt
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"followingfeed/config"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"followingfeed/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -13,46 +17,63 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var (
-	ErrSessionRevoked = errors.New("登录会话已注销")
-	ErrInvalidClaims  = errors.New("JWT claims 无效")
+const (
+	tokenIssuer            = "followingfeed"
+	accessTokenAudience    = "followingfeed-api"
+	refreshTokenAudience   = "followingfeed-token"
+	accessTokenLifetime    = 15 * time.Minute
+	refreshTokenLifetime   = 7 * 24 * time.Hour
+	refreshTokenCookieName = "followingfeed_refresh_token"
+	refreshTokenCookiePath = "/api/v1/users"
+	tokenClockSkew         = 30 * time.Second
 )
 
+var (
+	ErrSessionRevoked = errors.New("登录会话已注销")  // 令牌所属的登录会话已被注销。
+	ErrInvalidClaims  = errors.New("JWT 声明无效") // 令牌声明缺失、无效或与预期身份不一致。
+)
+
+// RedisJWTHandler 负责签发、解析 JWT，并通过 Redis 维护会话注销黑名单。
 type RedisJWTHandler struct {
-	cmd             redis.Cmdable
-	accessTokenKey  []byte
-	refreshTokenKey []byte
+	cmd             redis.Cmdable // 读写 Redis 中的会话注销记录。
+	accessTokenKey  []byte        // 签发和验证访问令牌的 HMAC 密钥。
+	refreshTokenKey []byte        // 签发和验证刷新令牌的 HMAC 密钥。
+	secureCookies   bool          // 决定刷新令牌 Cookie 是否仅允许通过 HTTPS 发送。
 }
 
+// NewRedisJWTHandler 根据 Redis 客户端和应用配置创建 JWT 处理器。
 func NewRedisJWTHandler(cmd redis.Cmdable, cfg config.Config) JWTHandler {
 	return &RedisJWTHandler{
 		cmd:             cmd,
 		accessTokenKey:  []byte(cfg.JWT.AccessTokenKey),
 		refreshTokenKey: []byte(cfg.JWT.RefreshTokenKey),
+		// 配置默认环境是 development；其他环境均默认只通过 HTTPS 发送刷新 Cookie。
+		secureCookies: cfg.Env != "development",
 	}
 }
 
+// UserClaims 是访问令牌携带的声明。
 type UserClaims struct {
-	//继承RegisteredClaims，实现claims
-	jwt.RegisteredClaims
-	//放入token的数据
-	Uid       int64
-	UserAgent string
-	Ssid      string
+	jwt.RegisteredClaims        // RegisteredClaims 包含签发者、受众、有效期、用户标识及令牌 ID 等标准声明。
+	Uid                  int64  `json:"uid"`  // 当前用户的唯一标识，必须与 RegisteredClaims.Subject 一致。
+	Ssid                 string `json:"ssid"` // 登录会话标识，用于检查该会话是否已被注销。
 }
 
+// RefreshClaims 是刷新令牌携带的声明。
 type RefreshClaims struct {
 	jwt.RegisteredClaims
-	Uid  int64
-	Ssid string
+	Uid  int64  `json:"uid"`
+	Ssid string `json:"ssid"` // 登录会话标识，新访问令牌沿用该标识以保持同一登录会话。
 }
 
+// SetLoginToken 为用户创建新会话，并同时向响应写入访问令牌和刷新令牌。
 func (rj *RedisJWTHandler) SetLoginToken(ctx *gin.Context, uid int64) error {
 	ssid := uuid.New().String()
 	err := rj.SetJWTToken(ctx, uid, ssid)
 	if err != nil {
 		return err
 	}
+
 	err = rj.setRefreshToken(ctx, uid, ssid)
 	if err != nil {
 		return err
@@ -60,19 +81,14 @@ func (rj *RedisJWTHandler) SetLoginToken(ctx *gin.Context, uid int64) error {
 	return nil
 }
 
+// SetJWTToken 签发访问令牌，并通过 X-JWT-Token 响应头返回给客户端。
+// uid 是用户唯一标识，ssid 是令牌所属的登录会话标识。
 func (rj *RedisJWTHandler) SetJWTToken(ctx *gin.Context, uid int64, Ssid string) error {
-	//生成token
-	//token := jwt.NewWithClaims(jwt.SigningMethodHS512, jwt.MapClaims{
-	//	"userId": u.Id,
-	//})
+	now := time.Now()
 	claims := UserClaims{
-		//设置token有效期
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute * 60)),
-		},
-		Uid:       uid,
-		UserAgent: ctx.Request.UserAgent(),
-		Ssid:      Ssid,
+		RegisteredClaims: newRegisteredClaims(now, uid, accessTokenAudience, accessTokenLifetime),
+		Uid:              uid,
+		Ssid:             Ssid,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
@@ -80,24 +96,46 @@ func (rj *RedisJWTHandler) SetJWTToken(ctx *gin.Context, uid int64, Ssid string)
 	if err != nil {
 		return err
 	}
-	//通过Http Response Header x-jwt-token返回
+	// 访问令牌由前端保存在内存中，通过自定义响应头返回。
 	ctx.Header("x-jwt-token", tokenStr)
 	return nil
 }
 
+// ParseAccessToken 验证并解析访问令牌字符串。
 func (rj *RedisJWTHandler) ParseAccessToken(tokenStr string) (*UserClaims, error) {
 	claims := &UserClaims{}
-	token, err := jwt.ParseWithClaims(tokenStr, claims, rj.keyFunc(rj.accessTokenKey))
-	if err != nil || token == nil || !token.Valid || claims.Uid == 0 {
+	token, err := jwt.ParseWithClaims(
+		tokenStr,
+		claims,
+		rj.keyFunc(rj.accessTokenKey),
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithIssuer(tokenIssuer),
+		jwt.WithAudience(accessTokenAudience),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithLeeway(tokenClockSkew),
+	)
+	if err != nil || token == nil || !token.Valid || !validIdentity(claims.RegisteredClaims, claims.Uid) || claims.Ssid == "" {
 		return nil, ErrInvalidClaims
 	}
 	return claims, nil
 }
 
+// ParseRefreshToken 验证并解析刷新令牌字符串。
 func (rj *RedisJWTHandler) ParseRefreshToken(tokenStr string) (*RefreshClaims, error) {
 	claims := &RefreshClaims{}
-	token, err := jwt.ParseWithClaims(tokenStr, claims, rj.keyFunc(rj.refreshTokenKey))
-	if err != nil || token == nil || !token.Valid || claims.Uid == 0 || claims.Ssid == "" {
+	token, err := jwt.ParseWithClaims(
+		tokenStr,
+		claims,
+		rj.keyFunc(rj.refreshTokenKey),
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithIssuer(tokenIssuer),
+		jwt.WithAudience(refreshTokenAudience),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithLeeway(tokenClockSkew),
+	)
+	if err != nil || token == nil || !token.Valid || !validIdentity(claims.RegisteredClaims, claims.Uid) || claims.Ssid == "" {
 		return nil, ErrInvalidClaims
 	}
 	return claims, nil
@@ -117,24 +155,13 @@ func (rj *RedisJWTHandler) keyFunc(key []byte) jwt.Keyfunc {
 
 // ClearToken 注销当前会话：清空返回给客户端的令牌，并将当前 SSID 写入 Redis 黑名单。
 // 黑名单记录保留 7 天，与刷新令牌的有效期一致，防止已注销的令牌在过期前再次使用。
-func (rj *RedisJWTHandler) ClearToken(ctx *gin.Context) error {
-	// 清空响应头中的访问令牌和刷新令牌，通知客户端删除本地保存的令牌。
+func (rj *RedisJWTHandler) ClearToken(ctx *gin.Context, ssid string) error {
+	// 清空响应头中的访问令牌，并让浏览器删除 HttpOnly 刷新令牌 Cookie。
 	ctx.Header("X-JWT-Token", "")
-	ctx.Header("x-refresh-token", "")
+	rj.ClearRefreshToken(ctx)
 
-	// 认证中间件应提前校验 JWT，并将 *UserClaims 保存到 Gin 上下文的 claims 中。
-	val, exists := ctx.Get("claims")
-	if !exists {
-		return fmt.Errorf("%w: 上下文中不存在 claims", ErrInvalidClaims)
-	}
-
-	// 安全断言 claims 类型，避免上下文数据类型错误时触发 panic。
-	claims, ok := val.(*UserClaims)
-	if !ok || claims == nil {
-		return fmt.Errorf("%w: claims 类型不是 *UserClaims", ErrInvalidClaims)
-	}
 	// SSID 是会话黑名单键的一部分，为空时不能生成有效的注销记录。
-	if claims.Ssid == "" {
+	if ssid == "" {
 		return fmt.Errorf("%w: SSID 为空", ErrInvalidClaims)
 	}
 
@@ -144,17 +171,18 @@ func (rj *RedisJWTHandler) ClearToken(ctx *gin.Context) error {
 		ctx：传递请求的取消和超时信号；
 		key：users:ssid:<ssid>，唯一标识当前登录会话；
 		value：空字符串，因为这里只需要判断 Key 是否存在；
-		expiration：7 天，与刷新令牌的有效期保持一致。
+		expiration：与刷新令牌的有效期保持一致。
 	*/
 	return rj.cmd.Set(
-		ctx,
-		fmt.Sprintf("users:ssid:%s", claims.Ssid),
+		ctx.Request.Context(),
+		fmt.Sprintf("users:ssid:%s", ssid),
 		"",
-		time.Hour*24*7,
+		refreshTokenLifetime,
 	).Err()
 }
 
-func (rj *RedisJWTHandler) CheckSession(ctx *gin.Context, Ssid string) error {
+// CheckSession 检查 ssid 对应的登录会话是否已被加入 Redis 注销黑名单。
+func (rj *RedisJWTHandler) CheckSession(ctx context.Context, Ssid string) error {
 	// users:ssid:<ssid> 是注销黑名单：key 存在表示该会话已经退出登录。
 	cnt, err := rj.cmd.Exists(ctx, fmt.Sprintf("users:ssid:%s", Ssid)).Result()
 	if err != nil {
@@ -166,35 +194,81 @@ func (rj *RedisJWTHandler) CheckSession(ctx *gin.Context, Ssid string) error {
 	return nil
 }
 
+// ExtractToken 从 Authorization 请求头提取 Bearer 访问令牌。
 func (rj *RedisJWTHandler) ExtractToken(ctx *gin.Context) string {
-	//读取前端请求头中的Authorization
-	headerToken := ctx.GetHeader("Authorization")
-
-	//Bearer eyJhbGciOiJIUzI1N...
-	segs := strings.Split(headerToken, " ")
-	if len(segs) != 2 {
+	// 访问令牌采用“Authorization: Bearer <token>”格式。
+	parts := strings.Fields(ctx.GetHeader("Authorization"))
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 		return ""
 	}
-	return segs[1]
+	return parts[1]
 }
 
+// ExtractRefreshToken 从 HttpOnly Cookie 读取刷新令牌，避免令牌暴露给浏览器脚本。
+func (rj *RedisJWTHandler) ExtractRefreshToken(ctx *gin.Context) string {
+	token, err := ctx.Cookie(refreshTokenCookieName)
+	if err != nil {
+		return ""
+	}
+	return token
+}
+
+// setRefreshToken 签发刷新令牌，并将其写入 HttpOnly Cookie。
 func (rj *RedisJWTHandler) setRefreshToken(ctx *gin.Context, uid int64, Ssid string) error {
+	now := time.Now()
 	claims := RefreshClaims{
-		//设置token有效期
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24 * 7)),
-		},
-		Uid:  uid,
-		Ssid: Ssid,
+		RegisteredClaims: newRegisteredClaims(now, uid, refreshTokenAudience, refreshTokenLifetime),
+		Uid:              uid,
+		Ssid:             Ssid,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-	//随机生成32位key
 	tokenStr, err := token.SignedString(rj.refreshTokenKey)
 	if err != nil {
 		return err
 	}
-	//通过Http Response Header x-refresh-token返回
-	ctx.Header("x-refresh-token", tokenStr)
+	rj.setRefreshTokenCookie(ctx, tokenStr, now.Add(refreshTokenLifetime), int(refreshTokenLifetime.Seconds()))
 	return nil
+}
+
+// ClearRefreshToken 删除浏览器保存的刷新令牌，不影响 Redis 中的会话状态。
+func (rj *RedisJWTHandler) ClearRefreshToken(ctx *gin.Context) {
+	rj.setRefreshTokenCookie(ctx, "", time.Unix(1, 0), -1)
+}
+
+// setRefreshTokenCookie 使用统一的安全属性设置或删除刷新令牌 Cookie。
+func (rj *RedisJWTHandler) setRefreshTokenCookie(
+	ctx *gin.Context,
+	value string,
+	expires time.Time,
+	maxAge int,
+) {
+	http.SetCookie(ctx.Writer, &http.Cookie{
+		Name:     refreshTokenCookieName,
+		Value:    value,
+		Path:     refreshTokenCookiePath,
+		Expires:  expires,
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   rj.secureCookies,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// newRegisteredClaims 创建包含身份、受众和有效期的标准 JWT 声明。
+func newRegisteredClaims(now time.Time, uid int64, audience string, lifetime time.Duration) jwt.RegisteredClaims {
+	return jwt.RegisteredClaims{
+		Issuer:    tokenIssuer,
+		Subject:   strconv.FormatInt(uid, 10),
+		Audience:  jwt.ClaimStrings{audience},
+		ExpiresAt: jwt.NewNumericDate(now.Add(lifetime)),
+		NotBefore: jwt.NewNumericDate(now),
+		IssuedAt:  jwt.NewNumericDate(now),
+		ID:        uuid.NewString(),
+	}
+}
+
+// validIdentity 校验自定义用户 ID 与标准 Subject 是否一致，并确认令牌 ID 非空。
+func validIdentity(claims jwt.RegisteredClaims, uid int64) bool {
+	return uid > 0 && claims.Subject == strconv.FormatInt(uid, 10) && claims.ID != ""
 }

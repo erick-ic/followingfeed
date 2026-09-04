@@ -5,6 +5,7 @@ import (
 	"errors"
 	"followingfeed/internal/domain"
 	"followingfeed/internal/repository"
+	"followingfeed/pkg/logger"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -13,7 +14,7 @@ import (
 
 var (
 	ErrUserDuplicated      = repository.ErrUserDuplicated
-	ErrUserNotFund         = repository.ErrUserNotFound
+	ErrUserNotFound        = repository.ErrUserNotFound
 	ErrInvalidUserPassword = errors.New("账号/邮箱或密码不对")
 	ErrInvalidNickname     = errors.New("昵称格式不正确")
 )
@@ -36,7 +37,11 @@ func (us *UserServiceImpl) Profile(ctx context.Context, uid int64) (domain.User,
 	return u, nil
 }
 
-func (us *UserServiceImpl) Login(ctx context.Context, email string, password string) (domain.User, error) {
+func (us *UserServiceImpl) Login(
+	ctx context.Context,
+	email string,
+	password string,
+) (domain.User, error) {
 	//1. 根据邮箱从数据库查询用户信息（含加密密码）
 	u, err := us.repo.FindByEmail(ctx, email)
 	//未找到用户
@@ -49,7 +54,6 @@ func (us *UserServiceImpl) Login(ctx context.Context, email string, password str
 	// 2. 比较明文密码与数据库中存储的哈希
 	err = bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password))
 	if err != nil {
-		//密码错误，写入日志
 		return domain.User{}, ErrInvalidUserPassword
 	}
 	return u, nil
@@ -74,7 +78,7 @@ func (us *UserServiceImpl) Create(ctx context.Context, u domain.User) error {
 	return us.repo.Create(ctx, u)
 }
 
-func NewUserServiceImpl(repo repository.UserRepository) UserService {
+func NewUserServiceImpl(repo repository.UserRepository, _ logger.LoggerV1) UserService {
 	return &UserServiceImpl{
 		repo: repo,
 	}

@@ -9,8 +9,11 @@ package main
 import (
 	"followingfeed/config"
 	"followingfeed/internal/handler/article"
+	"followingfeed/internal/handler/follow"
+	"followingfeed/internal/handler/interactive"
 	"followingfeed/internal/handler/jwt"
 	"followingfeed/internal/handler/user"
+	"followingfeed/internal/observability"
 	"followingfeed/internal/repository"
 	"followingfeed/internal/repository/cache"
 	"followingfeed/internal/repository/dao"
@@ -21,39 +24,65 @@ import (
 
 // Injectors from wire.go:
 
-func InitApp(cfg config.Config) (*App, error) {
-	cmdable, err := ioc.InitRedis(cfg)
+func InitApp(cfg config.Config) (*App, func(), error) {
+	metrics := observability.NewMetrics()
+	cmdable, err := ioc.InitRedis(cfg, metrics)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	jwtHandler := jwt.NewRedisJWTHandler(cmdable, cfg)
 	loggerV1 := ioc.InitLogger(cfg)
-	v := ioc.InitMiddlewares(cfg, cmdable, jwtHandler, loggerV1)
-	db, err := ioc.InitMySQL(cfg)
+	v := ioc.InitMiddlewares(cfg, cmdable, jwtHandler, loggerV1, metrics)
+	db, cleanup, err := ioc.InitMySQL(cfg, metrics)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	userDAO := dao.NewGORMUserDAO(db)
 	userCache := cache.NewUserCache(cmdable)
-	userRepository := repository.NewUserRepositoryImpl(userDAO, userCache)
-	userService := service.NewUserServiceImpl(userRepository)
-	userHandler := user.NewUserHandler(userService, cmdable, loggerV1, jwtHandler)
+	userRepository := repository.NewUserRepositoryImpl(userDAO, userCache, loggerV1)
+	userService := service.NewUserServiceImpl(userRepository, loggerV1)
+	followDAO := dao.NewFollow(db)
+	followRepository := repository.NewFollowRepository(followDAO)
+	userProfileCacheInvalidator := cache.NewUserProfileCacheInvalidator(cmdable)
+	followService := service.NewFollowService(followRepository, userService, userProfileCacheInvalidator, loggerV1)
 	articleDAO := dao.NewGORMArticleDAO(db)
 	articleCache := cache.NewRedisArticleCache(cmdable)
 	articleRepository := repository.NewArticleRepositoryImpl(articleDAO, articleCache, loggerV1)
-	articleService := service.NewArticleServiceImpl(articleRepository)
-	articleHandler := article.NewArticleHandler(articleService, loggerV1)
-	engine := ioc.InitGin(v, userHandler, articleHandler, db, cmdable)
-	app := &App{
-		Server: engine,
+	articleService := service.NewArticleServiceImpl(articleRepository, userProfileCacheInvalidator, loggerV1)
+	publicProfileCache := cache.NewPublicProfileCache(cmdable)
+	publicProfileService := service.NewPublicProfileService(userService, followService, articleService, publicProfileCache, loggerV1)
+	interactiveDAO := dao.NewInteractiveDAO(db)
+	interactiveRepository := repository.NewInteractiveRepository(interactiveDAO)
+	interactiveService := service.NewInteractiveService(interactiveRepository)
+	userArticleStatsCache := cache.NewUserArticleStatsCache(cmdable)
+	myProfileService := service.NewMyProfileService(userService, interactiveService, userArticleStatsCache, loggerV1)
+	userHandler := user.NewUserHandler(userService, publicProfileService, myProfileService, loggerV1, jwtHandler)
+	articleHandler := article.NewArticleHandler(articleService, loggerV1, interactiveService)
+	handler := follow.NewHandler(followService, loggerV1)
+	interactiveHandler := interactive.NewHandler(interactiveService, loggerV1)
+	engine, err := ioc.InitGin(cfg, v, userHandler, articleHandler, handler, interactiveHandler, db, cmdable)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
 	}
-	return app, nil
+	app := &App{
+		Server:  engine,
+		Metrics: metrics,
+		Logger:  loggerV1,
+	}
+	return app, func() {
+		cleanup()
+	}, nil
 }
 
 // wire.go:
 
-var thirdServiceSet = wire.NewSet(ioc.InitMySQL, ioc.InitRedis)
+var thirdServiceSet = wire.NewSet(ioc.InitMySQL, ioc.InitRedis, cache.NewPublicProfileCache, cache.NewUserArticleStatsCache, cache.NewUserProfileCacheInvalidator)
 
-var userHandlerSet = wire.NewSet(cache.NewUserCache, dao.NewGORMUserDAO, repository.NewUserRepositoryImpl, service.NewUserServiceImpl, user.NewUserHandler)
+var userHandlerSet = wire.NewSet(cache.NewUserCache, dao.NewGORMUserDAO, repository.NewUserRepositoryImpl, service.NewUserServiceImpl, service.NewPublicProfileService, service.NewMyProfileService, user.NewUserHandler)
 
 var articleHandlerSet = wire.NewSet(dao.NewGORMArticleDAO, cache.NewRedisArticleCache, repository.NewArticleRepositoryImpl, service.NewArticleServiceImpl, article.NewArticleHandler)
+
+var followHandlerSet = wire.NewSet(dao.NewFollow, repository.NewFollowRepository, service.NewFollowService, follow.NewHandler)
+
+var interactiveHandlerSet = wire.NewSet(dao.NewInteractiveDAO, repository.NewInteractiveRepository, service.NewInteractiveService, interactive.NewHandler)

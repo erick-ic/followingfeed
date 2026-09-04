@@ -2,73 +2,1030 @@ openapi: 3.0.3
 info:
   title: FollowingFeed API
   version: 1.0.0
+  description: >-
+    FollowingFeed 后端接口契约。除公开接口外，请通过 Bearer Token 认证。
+    成功返回 2xx，客户端错误返回 4xx，服务端错误返回 5xx；
+    响应体中的 code 用于细分业务结果。除健康检查和文档路由外，业务接口均受
+    Redis IP 限流保护：超限返回空响应体的 HTTP 429，限流依赖异常返回空响应体的 HTTP 500。
+    需要 Bearer 认证的接口在 Redis 会话检查失败时返回空响应体的 HTTP 503。
 servers:
-  - url: http://localhost:8080/api/v1
+  - url: /api/v1
+
+tags:
+  - name: User
+    description: 注册、登录和用户资料
+  - name: Follow
+    description: 关注关系
+  - name: Article
+    description: 文章制作与发布
+  - name: Interactive
+    description: 点赞、收藏和互动统计
+
 paths:
   /users/signup:
     post:
+      tags: [User]
       summary: 注册用户
-      responses: {"200": {description: OK}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignUpRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/NoDataResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "409": { $ref: "#/components/responses/ConflictResponse" }
+        "413": { $ref: "#/components/responses/PayloadTooLargeResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /users/login:
     post:
+      tags: [User]
       summary: 邮箱密码登录
-      responses: {"200": {description: OK}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/LoginResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/BusinessErrorResponse" }
+        "413": { $ref: "#/components/responses/PayloadTooLargeResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /users/profile:
     get:
+      tags: [User]
       summary: 获取当前用户资料
-      security: [{bearerAuth: []}]
-      responses: {"200": {description: OK}}
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/UserResultResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /users/refreshToken:
     post:
+      tags: [User]
       summary: 刷新访问令牌
-      security: [{bearerAuth: []}]
-      responses: {"200": {description: OK}}
+      description: 浏览器自动携带登录时设置的 HttpOnly 刷新令牌 Cookie。
+      security: [{ refreshCookie: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/AccessTokenResultResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "503": { $ref: "#/components/responses/BusinessErrorResponse" }
+
   /users/logout:
     post:
+      tags: [User]
       summary: 注销当前会话
-      security: [{bearerAuth: []}]
-      responses: {"200": {description: OK}}
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/NoDataResultResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /pub/users/{id}/profile:
+    get:
+      tags: [User]
+      summary: 获取作者公开资料
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200": { $ref: "#/components/responses/PublicUserResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "404": { $ref: "#/components/responses/NotFoundResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /users/{id}/follow:
+    post:
+      tags: [Follow]
+      summary: 关注用户
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200": { $ref: "#/components/responses/NoDataResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "404": { $ref: "#/components/responses/NotFoundResponse" }
+        "409": { $ref: "#/components/responses/ConflictResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /users/{id}/unfollow:
+    post:
+      tags: [Follow]
+      summary: 取消关注用户
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200": { $ref: "#/components/responses/NoDataResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /users/{id}/following/status:
+    get:
+      tags: [Follow]
+      summary: 查询是否关注目标用户
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200": { $ref: "#/components/responses/FollowStatusResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /users/{id}/following:
+    get:
+      tags: [Follow]
+      summary: 获取当前用户的关注列表
+      description: id 必须与当前登录用户 ID 一致。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200": { $ref: "#/components/responses/FollowPageResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "403": { $ref: "#/components/responses/ForbiddenResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /users/{id}/followers:
+    get:
+      tags: [Follow]
+      summary: 获取当前用户的粉丝列表
+      description: id 必须与当前登录用户 ID 一致。
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200": { $ref: "#/components/responses/FollowPageResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "403": { $ref: "#/components/responses/ForbiddenResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /articles/edit:
     post:
-      summary: 保存草稿
-      security: [{bearerAuth: []}]
-      responses: {"200": {description: OK}}
+      tags: [Article]
+      summary: 保存文章草稿
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArticleRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/ArticleIDResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "413": { $ref: "#/components/responses/PayloadTooLargeResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /articles/publish:
     post:
+      tags: [Article]
       summary: 发布文章
-      security: [{bearerAuth: []}]
-      responses: {"200": {description: OK}}
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArticleRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/ArticleIDResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "413": { $ref: "#/components/responses/PayloadTooLargeResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /articles/withdraw:
     post:
-      summary: 撤回文章
-      security: [{bearerAuth: []}]
-      responses: {"200": {description: OK}}
+      tags: [Article]
+      summary: 撤回已发布文章
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArticleIdRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/ArticleIDResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "413": { $ref: "#/components/responses/PayloadTooLargeResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /articles/delete:
     post:
-      summary: 删除文章
-      security: [{bearerAuth: []}]
-      responses: {"200": {description: OK}}
+      tags: [Article]
+      summary: 软删除文章
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArticleIdRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/ArticleIDResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "413": { $ref: "#/components/responses/PayloadTooLargeResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /articles/list:
     get:
-      summary: 获取当前用户文章列表
-      security: [{bearerAuth: []}]
-      responses: {"200": {description: OK}}
+      tags: [Article]
+      summary: 获取当前用户的文章列表
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200": { $ref: "#/components/responses/OwnArticlePageResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /articles/detail/{id}:
     get:
+      tags: [Article]
       summary: 获取当前用户的一篇文章
-      security: [{bearerAuth: []}]
-      responses: {"200": {description: OK}, "403": {description: Forbidden}}
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ArticleId"
+      responses:
+        "200": { $ref: "#/components/responses/ArticleResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "403": { $ref: "#/components/responses/ForbiddenResponse" }
+        "404": { $ref: "#/components/responses/NotFoundResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /pub/list:
     get:
+      tags: [Article]
       summary: 获取公开文章列表
-      responses: {"200": {description: OK}}
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200": { $ref: "#/components/responses/ArticlePageResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
   /pub/detail/{id}:
     get:
+      tags: [Article]
       summary: 获取公开文章详情
-      responses: {"200": {description: OK}}
+      parameters:
+        - $ref: "#/components/parameters/ArticleId"
+      responses:
+        "200": { $ref: "#/components/responses/ArticleResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "404": { $ref: "#/components/responses/NotFoundResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /feed:
+    get:
+      tags: [Article]
+      summary: 获取关注作者的文章 Feed
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200": { $ref: "#/components/responses/ArticlePageResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /pub/users/{id}/articles:
+    get:
+      tags: [Article]
+      summary: 获取指定作者的已发布文章
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200": { $ref: "#/components/responses/ArticlePageResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /pub/articles/interactions:
+    post:
+      tags: [Interactive]
+      summary: 批量获取公开文章互动统计
+      description: 一次最多查询 50 篇文章；没有互动记录的文章返回零值。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchInteractionRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/BatchInteractionResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "413": { $ref: "#/components/responses/PayloadTooLargeResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /pub/articles/{id}/like:
+    post:
+      tags: [Interactive]
+      summary: 点赞文章
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ArticleId"
+      responses:
+        "200": { $ref: "#/components/responses/NoDataResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "404": { $ref: "#/components/responses/NotFoundResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /pub/articles/{id}/unlike:
+    post:
+      tags: [Interactive]
+      summary: 取消点赞文章
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ArticleId"
+      responses:
+        "200": { $ref: "#/components/responses/NoDataResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /pub/articles/{id}/interactions/status:
+    get:
+      tags: [Interactive]
+      summary: 获取文章互动计数和当前用户状态
+      description: >-
+        匿名访问返回公开计数；携带有效令牌时同时返回当前用户的点赞和收藏状态。
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ArticleId"
+      responses:
+        "200":
+          { $ref: "#/components/responses/InteractionStatusResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /pub/articles/{id}/collect:
+    post:
+      tags: [Interactive]
+      summary: 收藏文章
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ArticleId"
+      responses:
+        "200": { $ref: "#/components/responses/NoDataResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "404": { $ref: "#/components/responses/NotFoundResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /pub/articles/{id}/uncollect:
+    post:
+      tags: [Interactive]
+      summary: 取消收藏文章
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ArticleId"
+      responses:
+        "200": { $ref: "#/components/responses/NoDataResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /pub/articles/{id}/interactions:
+    get:
+      tags: [Interactive]
+      summary: 获取文章公开互动计数
+      description: >-
+        兼容旧客户端保留；新客户端应使用
+        /pub/articles/{id}/interactions/status。
+      deprecated: true
+      parameters:
+        - $ref: "#/components/parameters/ArticleId"
+      responses:
+        "200": { $ref: "#/components/responses/InteractionCountResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
+  /users/me/collections:
+    get:
+      tags: [Interactive]
+      summary: 获取当前用户的收藏文章
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200": { $ref: "#/components/responses/CollectionPageResultResponse" }
+        "400": { $ref: "#/components/responses/BadRequestResponse" }
+        "401": { $ref: "#/components/responses/UnauthorizedResponse" }
+        "500": { $ref: "#/components/responses/InternalServerErrorResponse" }
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: followingfeed_refresh_token
+
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      description: 用户 ID
+      schema: { type: integer, format: int64, minimum: 1 }
+      example: 1
+    ArticleId:
+      name: id
+      in: path
+      required: true
+      description: 文章 ID
+      schema: { type: integer, format: int64, minimum: 1 }
+      example: 1
+    Page:
+      name: page
+      in: query
+      required: false
+      description: 页码，从 1 开始，默认 1
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: 每页数量，默认 10，最大 50
+      schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+
+  schemas:
+    SignUpRequest:
+      type: object
+      required: [nickname, email, password, confirm_password]
+      properties:
+        nickname:
+          type: string
+          minLength: 2
+          maxLength: 6
+          description: 2 至 6 位中文、英文字母或数字，且不得使用系统保留名称
+          example: 云端旅人
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          example: alice@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: >-
+            8 至 72 个 ASCII 字符，并包含字母、数字和以下至少一个特殊字符：
+            $ @ ! % * # ? &
+          example: Passw0rd!
+        confirm_password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: 必须与 password 一致
+          example: Passw0rd!
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, example: alice@example.com }
+        password: { type: string, format: password, example: Passw0rd! }
+
+    ArticleRequest:
+      type: object
+      required: [title, content]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 0
+          default: 0
+          description: 新建传 0；编辑或发布已有文章时传文章 ID
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: 最多 200 个 Unicode 字符
+          example: Go 服务依赖注入实践
+        content:
+          type: string
+          minLength: 1
+          description: >-
+            非空 UTF-8 正文，编码后最大 60 KiB（61440 字节）。OpenAPI 3.0
+            的 maxLength 按字符计数，无法准确表达字节上限，因此不声明 maxLength。
+          example: 文章正文
+
+    ArticleIdRequest:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer, format: int64, minimum: 1, example: 1 }
+
+    BatchInteractionRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { type: integer, format: int64, minimum: 1 }
+          example: [1, 2, 3]
+
+    ResultMeta:
+      type: object
+      required: [code, msg]
+      properties:
+        code: { type: integer, example: 0 }
+        msg: { type: string, example: success }
+
+    NoDataResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { type: object, nullable: true, example: null }
+
+    BusinessErrorResult:
+      type: object
+      required: [code, msg, data]
+      properties:
+        code:
+          type: integer
+          enum: [4, 5]
+          description: 4 表示参数或权限等业务错误，5 表示服务处理失败
+          example: 4
+        msg: { type: string, example: 参数错误 }
+        data: { type: object, nullable: true, example: null }
+
+    UserVO:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        nickname: { type: string, example: 云端旅人 }
+        email: { type: string, format: email, example: alice@example.com }
+        createdAt: { type: integer, format: int64, description: Unix 毫秒 }
+        updatedAt: { type: integer, format: int64, description: Unix 毫秒 }
+        articleLikeCount: { type: integer, format: int64, minimum: 0 }
+        articleReadCount: { type: integer, format: int64, minimum: 0 }
+        articleCollectCount: { type: integer, format: int64, minimum: 0 }
+
+    PublicUserVO:
+      type: object
+      required:
+        [id, nickname, createdAt, followingCount, followersCount, articleCount]
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        nickname: { type: string, example: 云端旅人 }
+        createdAt: { type: integer, format: int64, description: Unix 毫秒 }
+        followingCount: { type: integer, format: int64, minimum: 0 }
+        followersCount: { type: integer, format: int64, minimum: 0 }
+        articleCount: { type: integer, format: int64, minimum: 0 }
+
+    UserResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/UserVO" }
+
+    PublicUserResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/PublicUserVO" }
+
+    ArticleVO:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        title: { type: string, example: Go 服务依赖注入实践 }
+        abstract: { type: string, description: 列表返回的正文摘要 }
+        content: { type: string, description: 详情返回的完整正文 }
+        authorId: { type: integer, format: int64, example: 1 }
+        authorNickname: { type: string, example: 云端旅人 }
+        status:
+          {
+            type: integer,
+            format: int32,
+            enum: [0, 1, 2, 3],
+            description: 0未知、1草稿、2已发布、3私密,
+          }
+        createdAt:
+          {
+            type: integer,
+            format: int64,
+            description: Unix 毫秒时间戳,
+            example: 1786075200000,
+          }
+        updatedAt:
+          {
+            type: integer,
+            format: int64,
+            description: Unix 毫秒时间戳,
+            example: 1786075200000,
+          }
+
+    ArticlePageVO:
+      type: object
+      required: [items, page, pageSize, total, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ArticleVO" }
+        page: { type: integer, minimum: 1, example: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 50, example: 10 }
+        total: { type: integer, format: int64, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+
+    OwnArticlePageVO:
+      type: object
+      required: [list, summary]
+      properties:
+        list: { $ref: "#/components/schemas/ArticlePageVO" }
+        summary:
+          type: object
+          required: [draft, published]
+          properties:
+            draft: { type: integer, format: int64, minimum: 0 }
+            published: { type: integer, format: int64, minimum: 0 }
+
+    ArticleResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/ArticleVO" }
+
+    ArticleIDResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: integer
+              format: int64
+              minimum: 1
+              description: 新建、更新或状态变更后的文章 ID
+
+    ArticlePageResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/ArticlePageVO" }
+
+    OwnArticlePageResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/OwnArticlePageVO" }
+
+    FollowVO:
+      type: object
+      required: [id, followerId, followingId, createdAt, updatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        followerId: { type: integer, format: int64 }
+        followingId: { type: integer, format: int64 }
+        nickname: { type: string, example: 云端旅人 }
+        createdAt: { type: integer, format: int64, description: Unix 毫秒 }
+        updatedAt: { type: integer, format: int64, description: Unix 毫秒 }
+
+    FollowPageVO:
+      type: object
+      required: [items, page, pageSize, total, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FollowVO" }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 50 }
+        total: { type: integer, format: int64, minimum: 0 }
+        totalPages: { type: integer, format: int64, minimum: 0 }
+
+    FollowStatusVO:
+      type: object
+      required: [following]
+      properties:
+        following: { type: boolean, example: true }
+
+    FollowPageResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/FollowPageVO" }
+
+    FollowStatusResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/FollowStatusVO" }
+
+    InteractionCountVO:
+      type: object
+      required: [likeCount, readCount, collectCount]
+      properties:
+        likeCount: { type: integer, format: int64, minimum: 0 }
+        readCount: { type: integer, format: int64, minimum: 0 }
+        collectCount: { type: integer, format: int64, minimum: 0 }
+
+    InteractionStatusVO:
+      type: object
+      required: [liked, likeCount, readCount, collected, collectCount]
+      properties:
+        liked: { type: boolean }
+        likeCount: { type: integer, format: int64, minimum: 0 }
+        readCount: { type: integer, format: int64, minimum: 0 }
+        collected: { type: boolean }
+        collectCount: { type: integer, format: int64, minimum: 0 }
+
+    BatchInteractionData:
+      type: object
+      description: Key 为文章 ID 字符串，Value 为该文章互动计数
+      additionalProperties: { $ref: "#/components/schemas/InteractionCountVO" }
+      example:
+        "1": { likeCount: 3, readCount: 20, collectCount: 2 }
+
+    InteractionCountResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/InteractionCountVO" }
+
+    InteractionStatusResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/InteractionStatusVO" }
+
+    BatchInteractionResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/BatchInteractionData" }
+
+    CollectedArticleVO:
+      type: object
+      required: [id, title, abstract, authorId, status, createdAt, updatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        abstract: { type: string }
+        authorId: { type: integer, format: int64 }
+        authorNickname: { type: string }
+        status:
+          {
+            type: integer,
+            format: int32,
+            enum: [2],
+            description: 收藏列表仅返回已发布文章,
+          }
+        createdAt:
+          {
+            type: integer,
+            format: int64,
+            description: Unix 毫秒时间戳,
+            example: 1786075200000,
+          }
+        updatedAt:
+          {
+            type: integer,
+            format: int64,
+            description: Unix 毫秒时间戳,
+            example: 1786075200000,
+          }
+
+    CollectionPageVO:
+      type: object
+      required: [items, page, pageSize, total, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CollectedArticleVO" }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 50 }
+        total: { type: integer, format: int64, minimum: 0 }
+        totalPages: { type: integer, format: int64, minimum: 0 }
+
+    CollectionPageResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultMeta"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/CollectionPageVO" }
+
+  responses:
+    LoginResultResponse:
+      description: 登录成功时通过响应头返回访问令牌，并设置 HttpOnly 刷新令牌 Cookie
+      headers:
+        X-JWT-Token:
+          description: 访问令牌
+          schema: { type: string }
+        Set-Cookie:
+          description: HttpOnly 刷新令牌 Cookie
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/NoDataResult"
+              - $ref: "#/components/schemas/BusinessErrorResult"
+    AccessTokenResultResponse:
+      description: 刷新成功时通过响应头返回新的访问令牌
+      headers:
+        X-JWT-Token:
+          description: 新的访问令牌
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/NoDataResult"
+              - $ref: "#/components/schemas/BusinessErrorResult"
+    NoDataResultResponse:
+      description: 操作成功时 data 为 null
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/NoDataResult"
+              - $ref: "#/components/schemas/BusinessErrorResult"
+    UserResultResponse:
+      description: 当前用户资料或业务错误
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/UserResult" } },
+        }
+    PublicUserResultResponse:
+      description: 作者公开资料或业务错误
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/PublicUserResult" } },
+        }
+    ArticleResultResponse:
+      description: 文章详情或业务错误
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ArticleResult" } },
+        }
+    ArticleIDResultResponse:
+      description: 文章写入或状态变更成功，data 为文章 ID
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ArticleIDResult" }
+    ArticlePageResultResponse:
+      description: 文章分页结果或业务错误
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ArticlePageResult" } },
+        }
+    OwnArticlePageResultResponse:
+      description: 当前用户文章分页及状态统计
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/OwnArticlePageResult" } },
+        }
+    FollowPageResultResponse:
+      description: 关注或粉丝分页结果
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/FollowPageResult" } },
+        }
+    FollowStatusResultResponse:
+      description: 当前用户对目标用户的关注状态
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/FollowStatusResult" } },
+        }
+    InteractionCountResultResponse:
+      description: 文章公开互动计数
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/InteractionCountResult" } },
+        }
+    InteractionStatusResultResponse:
+      description: 当前用户的文章点赞和收藏状态
+      content:
+        {
+          application/json:
+            {
+              schema: { $ref: "#/components/schemas/InteractionStatusResult" },
+            },
+        }
+    BatchInteractionResultResponse:
+      description: 多篇文章的公开互动计数
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/BatchInteractionResult" } },
+        }
+    CollectionPageResultResponse:
+      description: 当前用户收藏文章分页结果
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/CollectionPageResult" } },
+        }
+    BusinessErrorResponse:
+      description: 与 HTTP 状态码对应的业务错误
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/BusinessErrorResult" } },
+        }
+    BadRequestResponse:
+      description: 请求格式或参数错误
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/BusinessErrorResult" } },
+        }
+    PayloadTooLargeResponse:
+      description: 请求体超过 1 MiB 限制
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/BusinessErrorResult" }
+    ForbiddenResponse:
+      description: 已认证，但没有资源访问权限
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/BusinessErrorResult" } },
+        }
+    NotFoundResponse:
+      description: 请求的资源不存在
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/BusinessErrorResult" } },
+        }
+    ConflictResponse:
+      description: 请求与资源当前状态冲突
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/BusinessErrorResult" } },
+        }
+    InternalServerErrorResponse:
+      description: 服务内部错误
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/BusinessErrorResult" } },
+        }
+    UnauthorizedResponse:
+      description: Token 缺失、无效或会话已失效；响应体为空

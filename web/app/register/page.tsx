@@ -35,12 +35,7 @@ export default function RegisterPage() {
 
     setSubmitting(true);
     try {
-      await registerRequest(
-        normalizedNickname,
-        email.trim(),
-        password,
-        confirmPassword,
-      );
+      await registerRequest(normalizedNickname, email.trim(), password, confirmPassword);
       router.push("/login");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "注册失败，请稍后重试");
@@ -80,9 +75,7 @@ export default function RegisterPage() {
               换一个
             </button>
           </div>
-          <span className="field-hint">
-            昵称用于文章署名，注册后可在个人信息中修改。
-          </span>
+          <span className="field-hint">昵称用于文章署名，注册后可在个人信息中修改。</span>
         </div>
 
         <div className="field">

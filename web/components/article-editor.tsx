@@ -3,15 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  Check,
-  Eye,
-  FileEdit,
-  LoaderCircle,
-  Save,
-  Send,
-} from "lucide-react";
+import { ArrowLeft, Check, Eye, FileEdit, LoaderCircle, Save, Send } from "lucide-react";
 import { AuthGuard } from "./auth-guard";
 import { ConfirmDialog } from "./confirm-dialog";
 import { api } from "../lib/api";
@@ -201,23 +193,11 @@ function Editor({ articleId: initialId }: { articleId?: number }) {
             onClick={() => void saveDraft()}
             disabled={saving}
           >
-            {saving ? (
-              <LoaderCircle className="spin" size={14} />
-            ) : (
-              <Save size={14} />
-            )}
+            {saving ? <LoaderCircle className="spin" size={14} /> : <Save size={14} />}
             保存草稿
           </button>
-          <button
-            className="button small"
-            onClick={requestPublish}
-            disabled={saving}
-          >
-            {saving ? (
-              <LoaderCircle className="spin" size={14} />
-            ) : (
-              <Send size={14} />
-            )}
+          <button className="button small" onClick={requestPublish} disabled={saving}>
+            {saving ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />}
             发布文章
           </button>
         </div>

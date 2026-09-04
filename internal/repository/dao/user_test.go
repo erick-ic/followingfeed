@@ -36,7 +36,8 @@ func TestGORMUserDAOInsert(t *testing.T) {
 			mock: func(t *testing.T) *sql.DB {
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
-				mock.ExpectExec("INSERT INTO `users`").WillReturnError(&mysql.MySQLError{Number: 1062})
+				mock.ExpectExec("INSERT INTO `users`").
+					WillReturnError(&mysql.MySQLError{Number: 1062})
 				return db
 			},
 			wantErr: ErrUserDuplicated,
@@ -46,7 +47,8 @@ func TestGORMUserDAOInsert(t *testing.T) {
 			mock: func(t *testing.T) *sql.DB {
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
-				mock.ExpectExec("INSERT INTO `users`").WillReturnError(errors.New("database unavailable"))
+				mock.ExpectExec("INSERT INTO `users`").
+					WillReturnError(errors.New("database unavailable"))
 				return db
 			},
 			wantErr: errors.New("database unavailable"),

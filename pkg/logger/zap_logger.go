@@ -35,6 +35,10 @@ func (z *ZapLogger) With(args ...Field) LoggerV1 {
 	}
 }
 
+func (z *ZapLogger) Sync() error {
+	return z.logger.Sync()
+}
+
 // 缺陷：参数转换存在[]zap.Field
 func (z *ZapLogger) toZapFields(fields []Field) []zap.Field {
 	res := make([]zap.Field, 0, len(fields))

@@ -2,15 +2,36 @@ env: development
 
 server:
   addr: ":8080"
+  # 直连开发环境不信任转发 IP；部署到反向代理后仅填写真实代理 IP 或 CIDR。
+  trusted_proxies: []
+
+swagger:
+  enabled: true
+
+observability:
+  metrics_addr: ":8081"
+
+migration:
+  timeout: "30m"
+  lock_timeout: 30
+  # 生产环境可设置独立迁移账号 DSN；本地留空时使用下方 mysql 配置。
+  dsn: ""
 
 mysql:
   host: "localhost"
   port: "13306"
   user: "followingfeed"
   database: "followingfeed"
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime: "30m"
+  connect_timeout: "3s"
+  read_timeout: "5s"
+  write_timeout: "5s"
+  query_timeout: "3s"
 
 redis:
-  addr: "localhost:6379"
+  addr: "127.0.0.1:6379"
 
 cors:
   allowed_origins:

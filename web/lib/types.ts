@@ -1,4 +1,15 @@
 export type ArticleStatus = 1 | 2 | 3;
+export type PageResult<T> = {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+export type MyArticleListResult = {
+  list: PageResult<Article>;
+  summary: { draft: number; published: number };
+};
 
 export type Article = {
   id: number;
@@ -8,16 +19,34 @@ export type Article = {
   authorId?: number;
   authorNickname?: string;
   status: ArticleStatus;
-  created_at: string;
-  updated_at: string;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type UserProfile = {
   id: number;
   nickname: string;
   email: string;
-  created_at: number;
-  updated_at: number;
+  createdAt: number;
+  updatedAt: number;
+  articleLikeCount?: number;
+  articleReadCount?: number;
+  articleCollectCount?: number;
+};
+
+export type PublicUserProfile = Pick<UserProfile, "id" | "nickname" | "createdAt"> & {
+  followingCount: number;
+  followersCount: number;
+  articleCount: number;
+};
+
+export type Follow = {
+  id: number;
+  followerId: number;
+  followingId: number;
+  nickname?: string;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export const articleStatus: Record<

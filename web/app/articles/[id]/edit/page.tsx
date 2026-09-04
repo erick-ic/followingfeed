@@ -1,9 +1,6 @@
 import { ArticleEditor } from "../../../../components/article-editor";
 
-export default function EditArticlePage({
-  params,
-}: {
-  params: { id: string };
-}) {
-  return <ArticleEditor articleId={Number(params.id)} />;
+export default async function EditArticlePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return <ArticleEditor articleId={Number(id)} />;
 }

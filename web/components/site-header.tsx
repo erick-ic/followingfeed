@@ -6,20 +6,37 @@ import { usePathname } from "next/navigation";
 import { LoaderCircle, Menu, PenLine, UserRound, X } from "lucide-react";
 import { useAuth } from "./auth-provider";
 import { ThemeToggle } from "./theme-toggle";
+import { getCurrentProfile } from "../lib/api";
+import type { UserProfile } from "../lib/types";
 
 export function SiteHeader() {
   const pathname = usePathname();
   const { ready, authenticated } = useAuth();
   const [open, setOpen] = useState(false);
   const [openingEditor, setOpeningEditor] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
   const publicLinks = [{ href: "/", label: "最新文章" }];
-  const privateLinks = [{ href: "/dashboard/articles", label: "我的文章" }];
+  const privateLinks = [
+    { href: "/feed", label: "我的关注" },
+    { href: "/collections", label: "我的收藏" },
+    { href: "/dashboard/articles", label: "我的文章" },
+  ];
   const links = authenticated ? [...publicLinks, ...privateLinks] : publicLinks;
 
   useEffect(() => {
     setOpeningEditor(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!ready || !authenticated) {
+      setProfile(null);
+      return;
+    }
+    void getCurrentProfile()
+      .then(setProfile)
+      .catch(() => setProfile(null));
+  }, [ready, authenticated]);
 
   function markEditorOpening(event: MouseEvent<HTMLAnchorElement>) {
     if (
@@ -38,19 +55,18 @@ export function SiteHeader() {
   return (
     <header className="site-header">
       <div className="header-inner">
-        <Link href="/" className="brand" onClick={() => setOpen(false)}>
+        <Link href="/" prefetch={false} className="brand" onClick={() => setOpen(false)}>
           <span>Following</span>
           <span className="brand-accent">Feed</span>
         </Link>
 
-        <nav className="desktop-nav" aria-label="主导航">
+        <nav className={`desktop-nav${ready ? "" : " auth-pending"}`} aria-label="主导航">
           {links.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className={
-                pathname === link.href ? "nav-link active" : "nav-link"
-              }
+              prefetch={false}
+              className={pathname === link.href ? "nav-link active" : "nav-link"}
             >
               {link.label}
             </Link>
@@ -64,6 +80,7 @@ export function SiteHeader() {
               <>
                 <Link
                   href="/articles/new"
+                  prefetch={false}
                   className="header-cta"
                   aria-busy={openingEditor}
                   onClick={markEditorOpening}
@@ -77,23 +94,21 @@ export function SiteHeader() {
                 </Link>
                 <Link
                   href="/profile"
-                  className={
-                    pathname === "/profile"
-                      ? "icon-button desktop-only active"
-                      : "icon-button desktop-only"
-                  }
+                  prefetch={false}
+                  className={`user-profile-link desktop-only${pathname === "/profile" ? " active" : ""}`}
                   aria-label="个人信息"
                   title="个人信息"
                 >
                   <UserRound size={17} />
+                  {profile?.nickname && <span>{profile.nickname}</span>}
                 </Link>
               </>
             ) : (
               <div className="auth-links desktop-only">
-                <Link href="/login" className="nav-link">
+                <Link href="/login" prefetch={false} className="nav-link">
                   登录
                 </Link>
-                <Link href="/register" className="header-cta">
+                <Link href="/register" prefetch={false} className="header-cta">
                   注册
                 </Link>
               </div>
@@ -116,9 +131,8 @@ export function SiteHeader() {
             <Link
               key={link.href}
               href={link.href}
-              className={
-                pathname === link.href ? "nav-link active" : "nav-link"
-              }
+              prefetch={false}
+              className={pathname === link.href ? "nav-link active" : "nav-link"}
               onClick={() => setOpen(false)}
             >
               {link.label}
@@ -127,18 +141,17 @@ export function SiteHeader() {
           {authenticated ? (
             <Link
               href="/profile"
-              className={
-                pathname === "/profile" ? "nav-link active" : "nav-link"
-              }
+              prefetch={false}
+              className={pathname === "/profile" ? "nav-link active" : "nav-link"}
               onClick={() => setOpen(false)}
             >
-              <UserRound size={16} />
               个人信息
             </Link>
           ) : (
             <>
               <Link
                 href="/login"
+                prefetch={false}
                 className="nav-link"
                 onClick={() => setOpen(false)}
               >
@@ -146,6 +159,7 @@ export function SiteHeader() {
               </Link>
               <Link
                 href="/register"
+                prefetch={false}
                 className="nav-link"
                 onClick={() => setOpen(false)}
               >

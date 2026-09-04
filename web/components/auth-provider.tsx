@@ -1,16 +1,14 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAccessToken } from "../lib/auth-storage";
-import { loginRequest, logoutRequest } from "../lib/api";
+import {
+  loginRequest,
+  logoutRequest,
+  getCurrentProfile,
+  clearCurrentProfileCache,
+} from "../lib/api";
+import type { UserProfile } from "../lib/types";
 
 type AuthContextValue = {
   ready: boolean;
@@ -27,12 +25,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
-    setAuthenticated(Boolean(getAccessToken()));
-    setReady(true);
+    let active = true;
+    void getCurrentProfile()
+      .then(() => {
+        if (active) setAuthenticated(true);
+      })
+      .catch(() => {
+        if (active) setAuthenticated(false);
+      })
+      .finally(() => {
+        if (active) setReady(true);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     await loginRequest(email, password);
+    clearCurrentProfileCache();
     setAuthenticated(true);
   }, []);
 
@@ -40,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await logoutRequest();
     } finally {
+      clearCurrentProfileCache();
       setAuthenticated(false);
       router.push("/");
       router.refresh();

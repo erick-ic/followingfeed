@@ -9,6 +9,8 @@ local window = tonumber(ARGV[1])
 -- 阈值
 local threshold = tonumber( ARGV[2])
 local now = tonumber(ARGV[3])
+-- member 必须在每次请求中唯一；如果直接使用毫秒时间戳，同一毫秒的并发请求会互相覆盖。
+local member = ARGV[4]
 -- 窗口的起始时间
 local min = now - window
 
@@ -19,8 +21,7 @@ if cnt >= threshold then
     -- 执行限流
     return "true"
 else
-    -- 把 score 和 member 都设置成 now
-    redis.call('ZADD', key, now, now)
+    redis.call('ZADD', key, now, member)
     redis.call('PEXPIRE', key, window)
     return "false"
 end

@@ -10,15 +10,17 @@ import {
   FileText,
   LoaderCircle,
   PenLine,
-  Plus,
   Send,
   Trash2,
   Undo2,
 } from "lucide-react";
 import { AuthGuard } from "../../../components/auth-guard";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
+import { InteractionSummary } from "../../../components/interaction-summary";
+import { PageSelect } from "../../../components/page-select";
+import { LocalDateTime } from "../../../components/local-date-time";
 import { api } from "../../../lib/api";
-import { articleStatus, type Article } from "../../../lib/types";
+import { articleStatus, type Article, type MyArticleListResult } from "../../../lib/types";
 
 const PAGE_SIZE = 10;
 
@@ -33,6 +35,10 @@ export default function MyArticlesPage() {
 function ArticleDashboard() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [draftCount, setDraftCount] = useState(0);
+  const [publishedCount, setPublishedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [workingId, setWorkingId] = useState<number | null>(null);
@@ -44,12 +50,16 @@ function ArticleDashboard() {
     setLoading(true);
     setError("");
     try {
-      const data = await api<Article[]>(
+      const data = await api<MyArticleListResult>(
         `/articles/list?page=${page}&pageSize=${PAGE_SIZE}`,
         {},
         { auth: true },
       );
-      setArticles(data);
+      setArticles(data.list.items);
+      setTotalPages(data.list.totalPages);
+      setTotal(data.list.total);
+      setDraftCount(data.summary.draft);
+      setPublishedCount(data.summary.published);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "文章列表加载失败");
     } finally {
@@ -66,11 +76,7 @@ function ArticleDashboard() {
     setWorkingId(publishTarget.id);
     setError("");
     try {
-      const detail = await api<Article>(
-        `/articles/detail/${publishTarget.id}`,
-        {},
-        { auth: true },
-      );
+      const detail = await api<Article>(`/articles/detail/${publishTarget.id}`, {}, { auth: true });
       await api<number>(
         "/articles/publish",
         {
@@ -133,20 +139,30 @@ function ArticleDashboard() {
     }
   }
 
+  const emptyDescription =
+    page === 1 ? "从一篇草稿开始，记录值得分享的技术经验。" : "返回上一页继续查看。";
+
   return (
     <div className="page-shell">
-      <div className="page-header">
+      <div className="dashboard-header hero">
         <div>
           <p className="eyebrow">Writing workspace</p>
-          <h1 className="page-title">我的文章</h1>
-          <p className="hero-copy" style={{ marginTop: 12, fontSize: 15 }}>
+          <h1 className="hero-title">我的文章</h1>
+          <p className="hero-copy">
             管理草稿与已发布内容，保持每一次更新都清晰可控。
+            {total > 0 && <span className="list-total">共 {total} 篇</span>}
           </p>
+          {!loading && total > 0 && (
+            <div className="dashboard-article-stats" aria-label="文章状态统计">
+              <span>
+                <strong>{publishedCount}</strong>已发布
+              </span>
+              <span>
+                <strong>{draftCount}</strong>草稿
+              </span>
+            </div>
+          )}
         </div>
-        <Link href="/articles/new" className="button">
-          <Plus size={16} />
-          写新文章
-        </Link>
       </div>
 
       {error && (
@@ -164,11 +180,7 @@ function ArticleDashboard() {
         <div className="empty-state">
           <FileText size={30} />
           <h2>{page === 1 ? "还没有文章" : "这一页没有文章"}</h2>
-          <p>
-            {page === 1
-              ? "从一篇草稿开始，记录值得分享的技术经验。"
-              : "返回上一页继续查看。"}
-          </p>
+          <p>{emptyDescription}</p>
           {page === 1 && (
             <Link href="/articles/new" className="button small">
               <PenLine size={14} />
@@ -185,32 +197,23 @@ function ArticleDashboard() {
               <article className="management-item" key={article.id}>
                 <div>
                   <h2>{article.title}</h2>
-                  <p className="article-excerpt">
-                    {article.abstract || "暂无摘要"}
-                  </p>
+                  <p className="article-excerpt">{article.abstract || "暂无摘要"}</p>
                   <div className="meta-row">
-                    <span className={`badge ${status.tone}`}>
-                      {status.label}
-                    </span>
+                    <span className={`badge ${status.tone}`}>{status.label}</span>
                     <span className="meta-item">
-                      <CalendarDays size={13} />
-                      {article.updated_at}
+                      <CalendarDays size={16} />
+                      <LocalDateTime value={article.updatedAt} />
                     </span>
+                    {article.status === 2 && <InteractionSummary articleId={article.id} />}
                   </div>
                 </div>
                 <div className="management-actions">
                   {article.status === 2 && (
-                    <Link
-                      href={`/articles/${article.id}?from=dashboard`}
-                      className="text-button"
-                    >
+                    <Link href={`/articles/${article.id}?from=dashboard`} className="text-button">
                       <Eye size={14} /> 查看
                     </Link>
                   )}
-                  <Link
-                    href={`/articles/${article.id}/edit`}
-                    className="text-button"
-                  >
+                  <Link href={`/articles/${article.id}/edit`} className="text-button">
                     <PenLine size={14} /> 编辑
                   </Link>
                   {article.status === 1 ? (
@@ -219,11 +222,7 @@ function ArticleDashboard() {
                       disabled={busy}
                       onClick={() => setPublishTarget(article)}
                     >
-                      {busy ? (
-                        <LoaderCircle className="spin" size={14} />
-                      ) : (
-                        <Send size={14} />
-                      )}
+                      {busy ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />}
                       发布
                     </button>
                   ) : article.status === 2 ? (
@@ -232,11 +231,7 @@ function ArticleDashboard() {
                       disabled={busy}
                       onClick={() => setWithdrawTarget(article)}
                     >
-                      {busy ? (
-                        <LoaderCircle className="spin" size={14} />
-                      ) : (
-                        <Undo2 size={14} />
-                      )}
+                      {busy ? <LoaderCircle className="spin" size={14} /> : <Undo2 size={14} />}
                       撤回
                     </button>
                   ) : null}
@@ -263,10 +258,10 @@ function ArticleDashboard() {
           >
             <ArrowLeft size={14} /> 上一页
           </button>
-          <span className="pagination-info">第 {page} 页</span>
+          <PageSelect page={page} totalPages={totalPages} onChange={setPage} />
           <button
             className="button secondary small"
-            disabled={articles.length < PAGE_SIZE}
+            disabled={page >= totalPages}
             onClick={() => setPage((value) => value + 1)}
           >
             下一页 <ArrowRight size={14} />

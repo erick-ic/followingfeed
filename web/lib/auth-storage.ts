@@ -1,24 +1,21 @@
-const ACCESS_TOKEN_KEY = "followingfeed_access_token";
-const REFRESH_TOKEN_KEY = "followingfeed_refresh_token";
+// 访问令牌只保存在当前页面进程的内存中，避免被持久化到 localStorage。
+// 页面刷新后由 HttpOnly 刷新 Cookie 静默换取新的访问令牌。
+let accessToken: string | null = null;
+
+// 清理旧版本持久化的令牌；迁移完成后不会再向 Web Storage 写入认证信息。
+if (typeof window !== "undefined") {
+  window.localStorage.removeItem("followingfeed_access_token");
+  window.localStorage.removeItem("followingfeed_refresh_token");
+}
 
 export function getAccessToken() {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
+  return accessToken;
 }
 
-export function getRefreshToken() {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(REFRESH_TOKEN_KEY);
+export function setAccessToken(token: string) {
+  accessToken = token;
 }
 
-export function setTokens(accessToken: string, refreshToken: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-}
-
-export function clearTokens() {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
-  window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+export function clearAccessToken() {
+  accessToken = null;
 }

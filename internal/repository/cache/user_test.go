@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"followingfeed/internal/domain"
 	"followingfeed/internal/repository/cache/redismocks"
@@ -27,7 +26,9 @@ func TestRedisUserCacheSet(t *testing.T) {
 			mock: func(ctrl *gomock.Controller) redis.Cmdable {
 				cmd := redismocks.NewMockCmdable(ctrl)
 				result := redis.NewStatusCmd(context.Background())
-				cmd.EXPECT().Set(gomock.Any(), "user:info:v2:1", []byte(`{"Id":1,"Nickname":"云端旅人","Email":"alice@example.com","Password":"hash","CreatedAt":0,"UpdatedAt":0}`), 15*time.Minute).Return(result)
+				cmd.EXPECT().
+					Set(gomock.Any(), "user:info:v1:1", []byte(`{"Id":1,"Nickname":"云端旅人","Email":"alice@example.com","CreatedAt":0,"UpdatedAt":0}`), gomock.Any()).
+					Return(result)
 				return cmd
 			},
 		},
@@ -37,7 +38,9 @@ func TestRedisUserCacheSet(t *testing.T) {
 				cmd := redismocks.NewMockCmdable(ctrl)
 				result := redis.NewStatusCmd(context.Background())
 				result.SetErr(errors.New("redis unavailable"))
-				cmd.EXPECT().Set(gomock.Any(), "user:info:v2:1", []byte(`{"Id":1,"Nickname":"云端旅人","Email":"alice@example.com","Password":"hash","CreatedAt":0,"UpdatedAt":0}`), 15*time.Minute).Return(result)
+				cmd.EXPECT().
+					Set(gomock.Any(), "user:info:v1:1", []byte(`{"Id":1,"Nickname":"云端旅人","Email":"alice@example.com","CreatedAt":0,"UpdatedAt":0}`), gomock.Any()).
+					Return(result)
 				return cmd
 			},
 			wantErr: errors.New("redis unavailable"),
@@ -46,7 +49,9 @@ func TestRedisUserCacheSet(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := NewUserCache(tc.mock(gomock.NewController(t))).Set(context.Background(), domain.User{
+			err := NewUserCache(
+				tc.mock(gomock.NewController(t)),
+			).Set(context.Background(), domain.User{
 				Id: 1, Nickname: "云端旅人", Email: "alice@example.com", Password: "hash",
 			})
 			if tc.wantErr == nil {
@@ -69,20 +74,20 @@ func TestRedisUserCacheGet(t *testing.T) {
 			name: "缓存命中",
 			mock: func(ctrl *gomock.Controller) redis.Cmdable {
 				cmd := redismocks.NewMockCmdable(ctrl)
-				result := redis.NewStringCmd(context.Background(), "user:info:v2:1")
-				result.SetVal(`{"Id":1,"Nickname":"云端旅人","Email":"alice@example.com","Password":"hash"}`)
-				cmd.EXPECT().Get(gomock.Any(), "user:info:v2:1").Return(result)
+				result := redis.NewStringCmd(context.Background(), "user:info:v1:1")
+				result.SetVal(`{"Id":1,"Nickname":"云端旅人","Email":"alice@example.com"}`)
+				cmd.EXPECT().Get(gomock.Any(), "user:info:v1:1").Return(result)
 				return cmd
 			},
-			want: domain.User{Id: 1, Nickname: "云端旅人", Email: "alice@example.com", Password: "hash"},
+			want: domain.User{Id: 1, Nickname: "云端旅人", Email: "alice@example.com"},
 		},
 		{
 			name: "缓存不存在",
 			mock: func(ctrl *gomock.Controller) redis.Cmdable {
 				cmd := redismocks.NewMockCmdable(ctrl)
-				result := redis.NewStringCmd(context.Background(), "user:info:v2:1")
+				result := redis.NewStringCmd(context.Background(), "user:info:v1:1")
 				result.SetErr(redis.Nil)
-				cmd.EXPECT().Get(gomock.Any(), "user:info:v2:1").Return(result)
+				cmd.EXPECT().Get(gomock.Any(), "user:info:v1:1").Return(result)
 				return cmd
 			},
 			wantErr: redis.Nil,
@@ -91,9 +96,9 @@ func TestRedisUserCacheGet(t *testing.T) {
 			name: "缓存数据格式错误",
 			mock: func(ctrl *gomock.Controller) redis.Cmdable {
 				cmd := redismocks.NewMockCmdable(ctrl)
-				result := redis.NewStringCmd(context.Background(), "user:info:v2:1")
+				result := redis.NewStringCmd(context.Background(), "user:info:v1:1")
 				result.SetVal("invalid-json")
-				cmd.EXPECT().Get(gomock.Any(), "user:info:v2:1").Return(result)
+				cmd.EXPECT().Get(gomock.Any(), "user:info:v1:1").Return(result)
 				return cmd
 			},
 			wantErr: errors.New("invalid character"),

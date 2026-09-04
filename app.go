@@ -1,7 +1,14 @@
 package main
 
-import "github.com/gin-gonic/gin"
+import (
+	"followingfeed/internal/observability"
+	"followingfeed/pkg/logger"
+
+	"github.com/gin-gonic/gin"
+)
 
 type App struct {
-	Server *gin.Engine
+	Server  *gin.Engine
+	Metrics *observability.Metrics
+	Logger  logger.LoggerV1
 }

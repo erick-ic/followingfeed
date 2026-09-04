@@ -1,58 +1,68 @@
 import Link from "next/link";
-import { ArrowLeft, CalendarDays, UserRound } from "lucide-react";
+import { CalendarDays, UserRound } from "lucide-react";
 import { api } from "../../../lib/api";
 import type { Article } from "../../../lib/types";
 import { MarkdownContent } from "../../../components/markdown-content";
+import { FollowButton } from "../../../components/follow-button";
+import { LikeButton } from "../../../components/like-button";
+import { CollectButton } from "../../../components/collect-button";
+import { ReadStat } from "../../../components/interaction-summary";
+import { BackButton } from "../../../components/back-button";
+import { ScrollActions } from "../../../components/scroll-actions";
+import { DetailScrollTop } from "../../../components/detail-scroll-top";
+import { LocalDateTime } from "../../../components/local-date-time";
 
-export default async function ArticlePage({
-  params,
-  searchParams,
-}: {
-  params: { id: string };
-  searchParams: { from?: string };
-}) {
-  const fromDashboard = searchParams.from === "dashboard";
-  const backHref = fromDashboard ? "/dashboard/articles" : "/";
-  const backLabel = fromDashboard ? "返回我的文章" : "返回文章列表";
+export default async function ArticlePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const backLabel = "返回";
+  let article: Article;
 
   try {
-    const article = await api<Article>(`/pub/detail/${params.id}`);
-    return (
-      <article className="reading-shell">
-        <header className="article-heading">
-          <Link href={backHref} className="back-link">
-            <ArrowLeft size={15} />
-            {backLabel}
-          </Link>
-          <h1 className="article-title">{article.title}</h1>
-          <div className="meta-row" style={{ marginTop: 20 }}>
-            {article.authorNickname && (
-              <span className="meta-item">
-                <UserRound size={14} />
-                {article.authorNickname}
-              </span>
-            )}
-            <span className="meta-item">
-              <CalendarDays size={14} />
-              更新于 {article.updated_at}
-            </span>
-          </div>
-        </header>
-        <MarkdownContent content={article.content || ""} />
-      </article>
-    );
+    article = await api<Article>(`/pub/detail/${id}`);
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "文章暂时无法加载";
     return (
       <div className="reading-shell">
+        <DetailScrollTop />
         <div className="error-state">
           <h1>没有找到这篇文章</h1>
           <p>{message}</p>
-          <Link href={backHref} className="button secondary small">
-            {backLabel}
-          </Link>
+          <BackButton fallbackLabel={backLabel} className="button secondary small" />
         </div>
       </div>
     );
   }
+
+  return (
+    <article className="reading-shell">
+      <DetailScrollTop />
+      <header className="article-heading">
+        <BackButton fallbackLabel={backLabel} />
+        <h1 className="article-title">{article.title}</h1>
+        <div className="meta-row article-detail-meta">
+          {article.authorNickname && (
+            <Link href={`/users/${article.authorId}`} className="meta-item article-author-meta">
+              <UserRound size={16} />
+              {article.authorNickname}
+            </Link>
+          )}
+          <span className="meta-item">
+            <CalendarDays size={16} />
+            发布于 <LocalDateTime value={article.createdAt} />
+          </span>
+          {article.authorId ? <FollowButton authorId={article.authorId} /> : null}
+          <LikeButton articleId={article.id} />
+          <ReadStat articleId={article.id} />
+          <CollectButton articleId={article.id} />
+        </div>
+      </header>
+      <MarkdownContent content={article.content || ""} />
+      <footer className="article-detail-footer">
+        <span className="article-updated-at">
+          最后更新于 <LocalDateTime value={article.updatedAt} />
+        </span>
+      </footer>
+      <ScrollActions />
+    </article>
+  );
 }

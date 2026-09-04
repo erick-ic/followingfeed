@@ -89,6 +89,7 @@ func TestGORMArticleDAOGetById(t *testing.T) {
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
 				mock.ExpectQuery("SELECT .* FROM `articles`").
+					WithArgs(int64(1), int64(2), sqlmock.AnyArg()).
 					WillReturnRows(articleRows().AddRow(1, "标题", []byte("正文"), 2, 2, 100, 200, 0))
 				return db
 			},
@@ -103,6 +104,7 @@ func TestGORMArticleDAOGetById(t *testing.T) {
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
 				mock.ExpectQuery("SELECT .* FROM `articles`").
+					WithArgs(int64(1), int64(2), sqlmock.AnyArg()).
 					WillReturnError(errors.New("database unavailable"))
 				return db
 			},
@@ -115,7 +117,55 @@ func TestGORMArticleDAOGetById(t *testing.T) {
 			db := tc.mock(t)
 			defer db.Close()
 			got, err := NewGORMArticleDAO(newArticleTestDB(t, db)).
-				GetById(context.Background(), 1)
+				GetById(context.Background(), 1, 2)
+			assert.Equal(t, tc.want, got)
+			if tc.wantErr == nil {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tc.wantErr.Error())
+			}
+		})
+	}
+}
+
+func TestGORMArticleDAOCountByAuthorStatus(t *testing.T) {
+	testCases := []struct {
+		name    string
+		mock    func(*testing.T) *sql.DB
+		want    []ArticleStatusCount
+		wantErr error
+	}{
+		{
+			name: "统计成功",
+			mock: func(t *testing.T) *sql.DB {
+				db, mock, err := sqlmock.New()
+				require.NoError(t, err)
+				mock.ExpectQuery("SELECT status, COUNT\\(\\*\\) AS count FROM `articles` WHERE author_id = \\? AND deleted_at = 0 GROUP BY `status`").
+					WithArgs(int64(1)).
+					WillReturnRows(sqlmock.NewRows([]string{"status", "count"}).AddRow(1, 2).AddRow(2, 3))
+				return db
+			},
+			want: []ArticleStatusCount{{Status: 1, Count: 2}, {Status: 2, Count: 3}},
+		},
+		{
+			name: "数据库异常",
+			mock: func(t *testing.T) *sql.DB {
+				db, mock, err := sqlmock.New()
+				require.NoError(t, err)
+				mock.ExpectQuery("SELECT status, COUNT\\(\\*\\) AS count FROM `articles`").
+					WillReturnError(errors.New("database unavailable"))
+				return db
+			},
+			wantErr: errors.New("database unavailable"),
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := tc.mock(t)
+			defer db.Close()
+			got, err := NewGORMArticleDAO(
+				newArticleTestDB(t, db),
+			).CountByAuthorStatus(context.Background(), 1)
 			assert.Equal(t, tc.want, got)
 			if tc.wantErr == nil {
 				assert.NoError(t, err)
@@ -297,9 +347,23 @@ func TestGORMArticleDAOUpdateByArticleId(t *testing.T) {
 				require.NoError(t, err)
 				mock.ExpectExec("UPDATE `articles` SET").
 					WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectQuery("SELECT count\\(\\*\\) FROM `articles`").
+					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 				return db
 			},
 			wantErr: true,
+		},
+		{
+			name: "写入相同值时保持幂等成功",
+			mock: func(t *testing.T) *sql.DB {
+				db, mock, err := sqlmock.New()
+				require.NoError(t, err)
+				mock.ExpectExec("UPDATE `articles` SET").
+					WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectQuery("SELECT count\\(\\*\\) FROM `articles`").
+					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+				return db
+			},
 		},
 		{
 			name: "数据库异常",
@@ -344,18 +408,32 @@ func TestGORMArticleDAOSyncStatus(t *testing.T) {
 				require.NoError(t, err)
 				mock.ExpectBegin()
 				mock.ExpectExec("UPDATE `articles` SET").WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("UPDATE `publish_articles` SET").WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("UPDATE `publish_articles` SET").
+					WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectCommit()
 				return db
 			},
 		},
 		{
-			name: "作者校验失败",
+			name: "文章已撤回、不存在或无权限时保持幂等成功",
 			mock: func(t *testing.T) *sql.DB {
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
 				mock.ExpectBegin()
 				mock.ExpectExec("UPDATE `articles` SET").WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectCommit()
+				return db
+			},
+		},
+		{
+			name: "线上文章不存在或状态异常",
+			mock: func(t *testing.T) *sql.DB {
+				db, mock, err := sqlmock.New()
+				require.NoError(t, err)
+				mock.ExpectBegin()
+				mock.ExpectExec("UPDATE `articles` SET").WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("UPDATE `publish_articles` SET").
+					WillReturnResult(sqlmock.NewResult(0, 0))
 				mock.ExpectRollback()
 				return db
 			},
@@ -393,22 +471,35 @@ func TestGORMArticleDAOSoftDelete(t *testing.T) {
 				require.NoError(t, err)
 				mock.ExpectBegin()
 				mock.ExpectExec("UPDATE `articles` SET").WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("UPDATE `publish_articles` SET").WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("UPDATE `publish_articles` SET").
+					WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectCommit()
 				return db
 			},
 		},
 		{
-			name: "文章不存在或无权限",
+			name: "文章已删除、不存在或无权限时保持幂等成功",
 			mock: func(t *testing.T) *sql.DB {
 				db, mock, err := sqlmock.New()
 				require.NoError(t, err)
 				mock.ExpectBegin()
 				mock.ExpectExec("UPDATE `articles` SET").WillReturnResult(sqlmock.NewResult(0, 0))
-				mock.ExpectRollback()
+				mock.ExpectCommit()
 				return db
 			},
-			wantErr: true,
+		},
+		{
+			name: "线上文章从未存在仍删除成功",
+			mock: func(t *testing.T) *sql.DB {
+				db, mock, err := sqlmock.New()
+				require.NoError(t, err)
+				mock.ExpectBegin()
+				mock.ExpectExec("UPDATE `articles` SET").WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("UPDATE `publish_articles` SET").
+					WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectCommit()
+				return db
+			},
 		},
 	}
 

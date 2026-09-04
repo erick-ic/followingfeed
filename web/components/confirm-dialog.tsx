@@ -42,17 +42,11 @@ export function ConfirmDialog({
         <h2 id="dialog-title">{title}</h2>
         <p>{description}</p>
         <div className="action-row" style={{ justifyContent: "flex-end" }}>
-          <button
-            className="button secondary small"
-            onClick={onCancel}
-            disabled={busy}
-          >
+          <button className="button secondary small" onClick={onCancel} disabled={busy}>
             取消
           </button>
           <button
-            className={
-              tone === "danger" ? "button danger small" : "button small"
-            }
+            className={tone === "danger" ? "button danger small" : "button small"}
             onClick={onConfirm}
             disabled={busy}
           >
