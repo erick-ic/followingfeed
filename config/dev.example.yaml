@@ -33,6 +33,10 @@ mysql:
 redis:
   addr: "127.0.0.1:6379"
 
+rate_limit:
+  window: "1s"
+  threshold: 100
+
 cors:
   allowed_origins:
     - "http://localhost:3000"

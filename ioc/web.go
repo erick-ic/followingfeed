@@ -83,9 +83,9 @@ func InitMiddlewares(
 		limitRequestBody(maxRequestBodyBytes),
 		// 跨域校验在业务路由之前执行，允许浏览器正确处理预检请求。
 		handleCors(cfg.CORS),
-		// 按客户端 IP 每秒最多放行 100 次；限流先于认证，避免无效令牌请求绕过流量保护。
+		// 按配置的滑动窗口和阈值限制客户端 IP；限流先于认证，避免无效令牌请求绕过流量保护。
 		// 健康检查和文档路由不依赖 Redis 限流状态，防止基础设施诊断被依赖故障阻断。
-		ratelimit.NewBuilder(redisClient, time.Second, 100).
+		ratelimit.NewBuilder(redisClient, cfg.RateLimit.Window, cfg.RateLimit.Threshold).
 			IgnorePaths(livePath, readyPath, openAPIPath).
 			IgnorePathPrefix("/swagger/").
 			Build(),

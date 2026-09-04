@@ -114,18 +114,25 @@ metric_judgment() {
 }
 
 report_metrics=(
-  '缓存路径失败数|.apache_bench.cached_path.failed_requests|lower|count'
-  '缓存路径吞吐|.apache_bench.cached_path.requests_per_second|higher|req/s'
-  '缓存路径平均耗时|.apache_bench.cached_path.mean_ms|lower|ms'
-  '缓存路径 P90|.apache_bench.cached_path.p90_ms|lower|ms'
-  '缓存路径 P95|.apache_bench.cached_path.p95_ms|lower|ms'
-  '缓存路径 P99|.apache_bench.cached_path.p99_ms|lower|ms'
-  '数据库路径失败数|.apache_bench.database_path.failed_requests|lower|count'
-  '数据库路径吞吐|.apache_bench.database_path.requests_per_second|higher|req/s'
-  '数据库路径平均耗时|.apache_bench.database_path.mean_ms|lower|ms'
-  '数据库路径 P90|.apache_bench.database_path.p90_ms|lower|ms'
-  '数据库路径 P95|.apache_bench.database_path.p95_ms|lower|ms'
-  '数据库路径 P99|.apache_bench.database_path.p99_ms|lower|ms'
+  '冷缓存首请求耗时|.cold_cache.latency_ms|lower|ms'
+  '热缓存路径失败总数|.apache_bench.cached_path.failed_requests|lower|count'
+  '热缓存路径吞吐中位数|.apache_bench.cached_path.requests_per_second|higher|req/s'
+  '热缓存路径平均耗时中位数|.apache_bench.cached_path.mean_ms|lower|ms'
+  '热缓存路径 P90 中位数|.apache_bench.cached_path.p90_ms|lower|ms'
+  '热缓存路径 P95 中位数|.apache_bench.cached_path.p95_ms|lower|ms'
+  '热缓存路径 P99 中位数|.apache_bench.cached_path.p99_ms|lower|ms'
+  '浅分页数据库路径失败总数|.apache_bench.database_path.failed_requests|lower|count'
+  '浅分页数据库路径吞吐中位数|.apache_bench.database_path.requests_per_second|higher|req/s'
+  '浅分页数据库路径平均耗时中位数|.apache_bench.database_path.mean_ms|lower|ms'
+  '浅分页数据库路径 P90 中位数|.apache_bench.database_path.p90_ms|lower|ms'
+  '浅分页数据库路径 P95 中位数|.apache_bench.database_path.p95_ms|lower|ms'
+  '浅分页数据库路径 P99 中位数|.apache_bench.database_path.p99_ms|lower|ms'
+  '深分页数据库路径失败总数|.apache_bench.deep_database_path.failed_requests|lower|count'
+  '深分页数据库路径吞吐中位数|.apache_bench.deep_database_path.requests_per_second|higher|req/s'
+  '深分页数据库路径平均耗时中位数|.apache_bench.deep_database_path.mean_ms|lower|ms'
+  '深分页数据库路径 P90 中位数|.apache_bench.deep_database_path.p90_ms|lower|ms'
+  '深分页数据库路径 P95 中位数|.apache_bench.deep_database_path.p95_ms|lower|ms'
+  '深分页数据库路径 P99 中位数|.apache_bench.deep_database_path.p99_ms|lower|ms'
   'HTTP 请求速率|.prometheus.http.request_rate_rps|context|req/s'
   'HTTP 5xx 比例|.prometheus.http.error_5xx_percent|lower|%'
   'HTTP P50|.prometheus.http.p50_ms|lower|ms'
@@ -139,10 +146,15 @@ report_metrics=(
 
 generated_at="$(json_value "${report_result}" '.generated_at')"
 git_commit="$(json_value "${report_result}" '.git_commit')"
+git_dirty="$(json_value "${report_result}" '.environment.git_dirty')"
 system_info="$(json_value "${report_result}" '.environment.system')"
 dataset_total="$(json_value "${report_result}" '.environment.dataset_total')"
 request_count="$(json_value "${report_result}" '.parameters.requests_per_path')"
 concurrency="$(json_value "${report_result}" '.parameters.concurrency')"
+duration_seconds="$(json_value "${report_result}" '.parameters.duration_seconds')"
+rounds="$(json_value "${report_result}" '.parameters.rounds')"
+deep_page="$(json_value "${report_result}" '.parameters.deep_page')"
+cold_wait="$(json_value "${report_result}" '.parameters.cold_wait_seconds')"
 
 {
   echo "# FollowingFeed 监控分析报告：${report_name}"
@@ -151,10 +163,19 @@ concurrency="$(json_value "${report_result}" '.parameters.concurrency')"
   echo
   echo "- 生成时间：${generated_at}"
   echo "- Git Commit：\`${git_commit}\`"
+  if [[ "${git_dirty}" == "true" ]]; then
+    echo "- Git 工作区：**存在未提交改动，报告只能用于本次本机诊断**"
+  else
+    echo "- Git 工作区：clean"
+  fi
   echo "- 本机环境：\`${system_info}\`"
   echo "- 公开文章数量：${dataset_total}"
-  echo "- 每条路径请求数：${request_count}"
+  echo "- 每轮请求数上限：${request_count}（持续时间大于 0 时由 ApacheBench 忽略）"
   echo "- 并发数：${concurrency}"
+  echo "- 每轮持续时间：${duration_seconds} 秒（0 表示按请求数执行）"
+  echo "- 重复轮数：${rounds}（表中 AB 性能指标取各轮中位数，失败数为各轮合计）"
+  echo "- 冷缓存等待：${cold_wait} 秒"
+  echo "- 深分页页码：${deep_page}"
   echo
   echo "## 本次指标"
   echo
@@ -178,10 +199,15 @@ concurrency="$(json_value "${report_result}" '.parameters.concurrency')"
     echo "- 对比基线：\`${report_compare_to}\`"
     comparison_consistent=true
     for comparison_path in \
+      '.schema_version' \
       '.environment.system' \
+      '.environment.git_dirty' \
       '.environment.dataset_total' \
       '.parameters.requests_per_path' \
       '.parameters.concurrency' \
+      '.parameters.duration_seconds' \
+      '.parameters.rounds' \
+      '.parameters.deep_page' \
       '.parameters.prometheus_rate_window'; do
       current_condition="$(json_value "${report_result}" "${comparison_path}")"
       previous_condition="$(json_value "${report_compare_to}" "${comparison_path}")"
@@ -202,7 +228,12 @@ concurrency="$(json_value "${report_result}" '.parameters.concurrency')"
       IFS='|' read -r metric_name metric_path metric_direction metric_unit <<<"${report_metric}"
       current_value="$(json_value "${report_result}" "${metric_path}")"
       previous_value="$(json_value "${report_compare_to}" "${metric_path}")"
-      echo "| ${metric_name} | $(format_value "${previous_value}" "${metric_unit}") | $(format_value "${current_value}" "${metric_unit}") | $(metric_change "${previous_value}" "${current_value}" "${metric_unit}") | $(metric_judgment "${previous_value}" "${current_value}" "${metric_direction}" "${metric_unit}") |"
+      if [[ "${comparison_consistent}" == true ]]; then
+        judgment="$(metric_judgment "${previous_value}" "${current_value}" "${metric_direction}" "${metric_unit}")"
+      else
+        judgment="条件不一致"
+      fi
+      echo "| ${metric_name} | $(format_value "${previous_value}" "${metric_unit}") | $(format_value "${current_value}" "${metric_unit}") | $(metric_change "${previous_value}" "${current_value}" "${metric_unit}") | ${judgment} |"
     done
   fi
 
@@ -211,13 +242,19 @@ concurrency="$(json_value "${report_result}" '.parameters.concurrency')"
   echo
   cached_failed="$(json_value "${report_result}" '.apache_bench.cached_path.failed_requests')"
   database_failed="$(json_value "${report_result}" '.apache_bench.database_path.failed_requests')"
+  deep_database_failed="$(json_value "${report_result}" '.apache_bench.deep_database_path.failed_requests')"
+  cold_status="$(json_value "${report_result}" '.cold_cache.status_code')"
   http_5xx="$(json_value "${report_result}" '.prometheus.http.error_5xx_percent')"
   if awk -v cached="${cached_failed:-0}" -v database="${database_failed:-0}" \
-    -v errors="${http_5xx:-0}" \
-    'BEGIN { exit !((cached == 0) && (database == 0) && (errors == 0)) }'; then
-    echo "- 基础守护指标通过：请求失败数为 0，HTTP 5xx 为 0。"
+    -v deep="${deep_database_failed:-0}" -v cold="${cold_status:-0}" -v errors="${http_5xx:-0}" \
+    'BEGIN { exit !((cached == 0) && (database == 0) && (deep == 0) && (cold == 200) && (errors == 0)) }'; then
+    echo "- 基础守护指标通过：冷缓存请求成功，多轮压测失败数为 0，HTTP 5xx 为 0。"
   else
-    echo "- 基础守护指标未通过：请先检查失败请求或 HTTP 5xx，再评价性能变化。"
+    echo "- 基础守护指标未通过：请先检查冷缓存状态、失败请求或 HTTP 5xx，再评价性能变化。"
+  fi
+  echo "- 缓存命中率由压测前后计数器差值计算，只覆盖本次测试区间；运行期间不得混入其他流量。"
+  if [[ "${git_dirty}" == "true" ]]; then
+    echo "- **当前工作区存在未提交改动；用于正式前后对比前，请先提交并重新生成基线。**"
   fi
   echo "- 低于 3% 的相对变化或低于 0.5 个百分点的比例变化标记为“基本持平”，用于过滤本机正常波动。"
   echo "- 本报告只适合相同机器、数据量、请求数和并发参数下的优化前后比较，不代表生产容量或 SLO。"

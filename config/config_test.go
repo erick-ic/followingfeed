@@ -61,6 +61,8 @@ func TestViperUnmarshalConfig(t *testing.T) {
 	assert.Equal(t, 5*time.Second, cfg.MySQL.ReadTimeout)
 	assert.Equal(t, 5*time.Second, cfg.MySQL.WriteTimeout)
 	assert.Equal(t, 3*time.Second, cfg.MySQL.QueryTimeout)
+	assert.Equal(t, time.Second, cfg.RateLimit.Window)
+	assert.Equal(t, 100, cfg.RateLimit.Threshold)
 }
 
 func TestViperUnmarshalEnablesSwaggerUI(t *testing.T) {
@@ -115,6 +117,13 @@ func TestValidateRejectsInvalidTrustedProxy(t *testing.T) {
 	assert.EqualError(t, cfg.validate(), "可信代理地址无效：proxy.internal")
 }
 
+func TestValidateRejectsInvalidRateLimit(t *testing.T) {
+	cfg := validConfig()
+	cfg.RateLimit.Threshold = 0
+
+	assert.EqualError(t, cfg.validate(), "限流窗口和阈值必须大于 0")
+}
+
 func validConfig() Config {
 	return Config{
 		Server: ServerConfig{
@@ -129,6 +138,9 @@ func validConfig() Config {
 			WriteTimeout: time.Second, QueryTimeout: time.Second,
 		},
 		Redis: RedisConfig{Addr: "redis:6379"},
+		RateLimit: RateLimitConfig{
+			Window: time.Second, Threshold: 100,
+		},
 		JWT: JWTConfig{
 			AccessTokenKey:  "access-token-key-at-least-32-characters",
 			RefreshTokenKey: "refresh-token-key-at-least-32-characters",

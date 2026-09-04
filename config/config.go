@@ -19,6 +19,7 @@ type Config struct {
 	Server        ServerConfig        `mapstructure:"server"        yaml:"server"`        // HTTP 服务配置。
 	MySQL         MySQLConfig         `mapstructure:"mysql"         yaml:"mysql"`         // 数据库连接和连接池配置。
 	Redis         RedisConfig         `mapstructure:"redis"         yaml:"redis"`         // 缓存服务配置。
+	RateLimit     RateLimitConfig     `mapstructure:"rate_limit"    yaml:"rate_limit"`    // 基于 Redis 的客户端 IP 限流配置。
 	JWT           JWTConfig           `mapstructure:"jwt"           yaml:"jwt"`           // 令牌签名配置。
 	CORS          CORSConfig          `mapstructure:"cors"          yaml:"cors"`          // 跨域访问策略。
 	Observability ObservabilityConfig `mapstructure:"observability" yaml:"observability"` // 监控指标服务配置。
@@ -99,6 +100,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("mysql.write_timeout", "5s")
 	v.SetDefault("mysql.query_timeout", "3s")
 	v.SetDefault("redis.addr", "")
+	v.SetDefault("rate_limit.window", "1s")
+	v.SetDefault("rate_limit.threshold", 100)
 	v.SetDefault("jwt.access_token_key", "")
 	v.SetDefault("jwt.refresh_token_key", "")
 	v.SetDefault("cors.allowed_origins", []string{})
@@ -143,6 +146,9 @@ func (cfg Config) validate() error {
 	}
 	if cfg.Redis.Addr == "" {
 		return errors.New("Redis 地址不能为空")
+	}
+	if cfg.RateLimit.Window <= 0 || cfg.RateLimit.Threshold <= 0 {
+		return errors.New("限流窗口和阈值必须大于 0")
 	}
 	if len(cfg.JWT.AccessTokenKey) < 32 || len(cfg.JWT.RefreshTokenKey) < 32 {
 		return errors.New("JWT 签名密钥长度均不得少于 32 个字符")
@@ -227,6 +233,12 @@ func applyMySQLRuntimeOptions(dsn *mysqlDriver.Config, cfg MySQLConfig) {
 // RedisConfig 定义 Redis 服务地址。
 type RedisConfig struct {
 	Addr string `mapstructure:"addr" yaml:"addr"` // Redis 服务地址，格式为 host:port。
+}
+
+// RateLimitConfig 定义按客户端 IP 计算的分布式滑动窗口限流参数。
+type RateLimitConfig struct {
+	Window    time.Duration `mapstructure:"window"    yaml:"window"`    // 统计窗口长度。
+	Threshold int           `mapstructure:"threshold" yaml:"threshold"` // 单个窗口内允许的最大请求数。
 }
 
 // JWTConfig 定义访问令牌和刷新令牌的签名密钥。

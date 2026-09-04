@@ -226,7 +226,7 @@ MySQL 事务实现强一致。
 - 最大 1 MiB 请求体；
 - 可配置 CORS 白名单；
 - JWT 身份校验与 Redis 会话黑名单；
-- Redis 分布式限流，当前配置为每秒 100 个请求；
+- Redis 分布式限流，默认配置为每个客户端 IP 每秒 100 个请求，可按环境调整窗口和阈值；
 - `/health/live` 进程存活检查；
 - `/health/ready` MySQL、Redis 就绪检查。
 
