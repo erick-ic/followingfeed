@@ -19,9 +19,9 @@ up:
 up-detached:
 	docker compose up -d --build
 
-# 停止并删除 Compose 容器和网络，保留 MySQL、Grafana 命名数据卷。
+# 停止并删除业务及监控容器和网络，保留 MySQL、Grafana 命名数据卷。
 down:
-	docker compose down
+	docker compose --profile observability down
 
 # 完整演示环境的便捷入口，当前行为与 up 相同。
 demo:
@@ -31,9 +31,10 @@ demo:
 observability-up:
 	docker compose --profile observability up -d prometheus grafana
 
-# 停止监控组件，不影响 API、Web、MySQL 和 Redis。
+# 停止并删除监控容器，下次启动使用当前网络；保留 Grafana 命名数据卷。
+# 不影响 API、Web、MySQL 和 Redis。Prometheus 容器内的历史指标会被清除。
 observability-down:
-	docker compose --profile observability stop grafana prometheus
+	docker compose --profile observability rm --stop --force grafana prometheus
 
 # 对公开只读接口执行一次本地基线压测，并输出 Prometheus 指标摘要。
 observability-baseline:
