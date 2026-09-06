@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"followingfeed/config"
+	ijwt "followingfeed/internal/handler/jwt"
 	"followingfeed/internal/observability"
 	"followingfeed/internal/repository/dao"
 	"followingfeed/ioc"
@@ -256,4 +257,32 @@ func TestHTTPInteractionLikeCollectAndCollections(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(res.Data, &page))
 	assert.Equal(t, int64(1), page.Total)
+}
+
+func TestHTTPSessionRevocationAndLoss(t *testing.T) {
+	f := newE2EFixture(t)
+	_, token := f.signupAndLogin(t, "会话测试")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	jwtHandler := ijwt.NewRedisJWTHandler(f.redis, cfg)
+	claims, err := jwtHandler.ParseAccessToken(token)
+	require.NoError(t, err)
+	require.NoError(t, jwtHandler.CheckSession(context.Background(), claims.Ssid))
+	f.request(t, http.MethodPost, "/api/v1/users/logout", nil, token)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/profile", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+	f.server.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusUnauthorized, resp.Code)
+
+	// 用真实 Redis 删除一个会话模拟数据丢失；只影响本测试令牌。
+	_, token = f.signupAndLogin(t, "丢失测试")
+	claims, err = jwtHandler.ParseAccessToken(token)
+	require.NoError(t, err)
+	require.NoError(t, f.redis.Del(context.Background(), "users:session:v2:"+claims.Ssid).Err())
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/users/profile", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp = httptest.NewRecorder()
+	f.server.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusUnauthorized, resp.Code)
 }

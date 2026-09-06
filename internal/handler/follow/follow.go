@@ -13,10 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	maxPageSize = 50
-)
-
 type Handler struct {
 	svc service.FollowService
 	l   logger.LoggerV1
@@ -241,13 +237,7 @@ func (h *Handler) Follow(ctx *gin.Context, claims *ijwt.UserClaims) (handler.Res
 
 // validatePagination 校验列表分页参数范围。
 func validatePagination(req ListReq) string {
-	if req.Page < 1 || req.PageSize < 1 {
-		return "page 和 pageSize 必须大于 0"
-	}
-	if req.PageSize > maxPageSize {
-		return "pageSize 不能超过 50"
-	}
-	return ""
+	return handler.ValidatePagination(req.Page, req.PageSize)
 }
 
 func targetID(ctx *gin.Context) (int64, bool) {

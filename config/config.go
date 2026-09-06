@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 // Config 汇总 API 服务及其辅助命令共享的全部配置。
 type Config struct {
+	Auth          AuthConfig          `mapstructure:"auth" yaml:"auth"`
 	Env           string              `mapstructure:"env"           yaml:"env"`           // 标识当前运行环境，例如 development 或 production。
 	Server        ServerConfig        `mapstructure:"server"        yaml:"server"`        // HTTP 服务配置。
 	MySQL         MySQLConfig         `mapstructure:"mysql"         yaml:"mysql"`         // 数据库连接和连接池配置。
@@ -100,6 +102,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("mysql.write_timeout", "5s")
 	v.SetDefault("mysql.query_timeout", "3s")
 	v.SetDefault("redis.addr", "")
+	v.SetDefault("redis.username", "")
+	v.SetDefault("redis.password", "")
+	v.SetDefault("redis.db", 0)
+	v.SetDefault("redis.tls", false)
+	v.SetDefault("auth.signup_enabled", true)
+	v.SetDefault("auth.publishing_enabled", true)
+	v.SetDefault("auth.rate_window", "1m")
+	v.SetDefault("auth.rate_threshold", 10)
+	v.SetDefault("auth.max_concurrent", 2)
 	v.SetDefault("rate_limit.window", "1s")
 	v.SetDefault("rate_limit.threshold", 100)
 	v.SetDefault("jwt.access_token_key", "")
@@ -144,6 +155,12 @@ func (cfg Config) validate() error {
 			return fmt.Errorf("MySQL DSN 无效：%w", err)
 		}
 	}
+	if cfg.Auth.RateWindow <= 0 || cfg.Auth.RateThreshold <= 0 || cfg.Auth.MaxConcurrent < 1 {
+		return errors.New("认证限流配置无效")
+	}
+	if cfg.Redis.DB < 0 {
+		return errors.New("Redis DB 不能为负数")
+	}
 	if cfg.Redis.Addr == "" {
 		return errors.New("Redis 地址不能为空")
 	}
@@ -156,12 +173,23 @@ func (cfg Config) validate() error {
 	if cfg.JWT.AccessTokenKey == cfg.JWT.RefreshTokenKey {
 		return errors.New("访问令牌和刷新令牌不得使用相同签名密钥")
 	}
+	if cfg.Env == "production" {
+		for _, key := range []string{cfg.JWT.AccessTokenKey, cfg.JWT.RefreshTokenKey} {
+			if strings.HasPrefix(key, "local-development-") || strings.Contains(key, "change-before-production") {
+				return errors.New("生产环境禁止使用示例 JWT 密钥")
+			}
+		}
+	}
 	if cfg.Env == "production" && len(cfg.CORS.AllowedOrigins) == 0 {
 		return errors.New("生产环境的 CORS 允许来源不能为空")
 	}
 	for _, origin := range cfg.CORS.AllowedOrigins {
 		if origin == "*" {
 			return errors.New("携带认证 Cookie 时 CORS 不允许使用通配来源")
+		}
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+			return errors.New("CORS 来源必须为不含路径的 HTTP(S) origin")
 		}
 	}
 	if cfg.Observability.MetricsAddr == "" {
@@ -232,7 +260,20 @@ func applyMySQLRuntimeOptions(dsn *mysqlDriver.Config, cfg MySQLConfig) {
 
 // RedisConfig 定义 Redis 服务地址。
 type RedisConfig struct {
-	Addr string `mapstructure:"addr" yaml:"addr"` // Redis 服务地址，格式为 host:port。
+	Addr     string `mapstructure:"addr" yaml:"addr"` // Redis 服务地址，格式为 host:port。
+	Username string `mapstructure:"username" yaml:"username"`
+	Password string `mapstructure:"password" yaml:"password"`
+	DB       int    `mapstructure:"db" yaml:"db"`
+	TLS      bool   `mapstructure:"tls" yaml:"tls"`
+}
+
+// AuthConfig 控制公开注册、发布以及高 CPU 认证请求的预算。
+type AuthConfig struct {
+	SignupEnabled     bool          `mapstructure:"signup_enabled" yaml:"signup_enabled"`
+	PublishingEnabled bool          `mapstructure:"publishing_enabled" yaml:"publishing_enabled"`
+	RateWindow        time.Duration `mapstructure:"rate_window" yaml:"rate_window"`
+	RateThreshold     int           `mapstructure:"rate_threshold" yaml:"rate_threshold"`
+	MaxConcurrent     int           `mapstructure:"max_concurrent" yaml:"max_concurrent"`
 }
 
 // RateLimitConfig 定义按客户端 IP 计算的分布式滑动窗口限流参数。

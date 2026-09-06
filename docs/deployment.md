@@ -1,10 +1,11 @@
 # 部署指南
 
-本文以 API 的生产部署为主；前端需单独构建。仓库内 Compose 仅用于本地完整演示。
+本文以 API 的生产部署为主；前端需单独构建。`docker-compose.yaml` 用于本地演示；
+小服务器独立部署使用 `compose.production.yaml`，步骤见[小服务器部署说明](production-small-server.md)。
 
 仓库根目录的 `docker-compose.yaml` 默认只启动 MySQL、迁移任务、Redis、API 和前端。
 Prometheus 和 Grafana 位于可选的 `observability`
-Profile，通过 `make observability-up` 按需启动。生产环境仍应使用托管依赖和独立发布流程，
+Profile，通过 `make observability-up` 按需启动。生产环境应使用独立依赖和发布流程，
 不直接照搬本地 Compose 配置。
 
 ## 1. 准备依赖
@@ -40,6 +41,15 @@ FOLLOWINGFEED_MYSQL_READ_TIMEOUT=5s
 FOLLOWINGFEED_MYSQL_WRITE_TIMEOUT=5s
 FOLLOWINGFEED_MYSQL_QUERY_TIMEOUT=3s
 FOLLOWINGFEED_REDIS_ADDR=redis.internal:6379
+FOLLOWINGFEED_REDIS_USERNAME=<optional-acl-user>
+FOLLOWINGFEED_REDIS_PASSWORD=<optional-secret>
+FOLLOWINGFEED_REDIS_DB=0
+FOLLOWINGFEED_REDIS_TLS=false
+FOLLOWINGFEED_AUTH_SIGNUP_ENABLED=false
+FOLLOWINGFEED_AUTH_PUBLISHING_ENABLED=false
+FOLLOWINGFEED_AUTH_RATE_WINDOW=1m
+FOLLOWINGFEED_AUTH_RATE_THRESHOLD=10
+FOLLOWINGFEED_AUTH_MAX_CONCURRENT=1
 FOLLOWINGFEED_RATE_LIMIT_WINDOW=1s
 FOLLOWINGFEED_RATE_LIMIT_THRESHOLD=100
 FOLLOWINGFEED_OBSERVABILITY_METRICS_ADDR=:8081

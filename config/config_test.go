@@ -126,6 +126,7 @@ func TestValidateRejectsInvalidRateLimit(t *testing.T) {
 
 func validConfig() Config {
 	return Config{
+		Auth: AuthConfig{SignupEnabled: true, PublishingEnabled: true, RateWindow: time.Minute, RateThreshold: 10, MaxConcurrent: 2},
 		Server: ServerConfig{
 			Addr: ":8080", ReadTimeout: time.Second, ReadHeaderTimeout: time.Second,
 			WriteTimeout: time.Second, IdleTimeout: time.Second, ShutdownTimeout: time.Second,
@@ -175,4 +176,26 @@ func TestValidateMigrationAcceptsDedicatedDSNWithoutApplicationConfig(t *testing
 
 	require.NoError(t, cfg.validateMigration())
 	assert.Equal(t, cfg.Migration.DSN, cfg.MigrationDSN())
+}
+
+func TestProductionRejectsExampleKeyAndInvalidOrigin(t *testing.T) {
+	cfg := validConfig()
+	cfg.Env = "production"
+	cfg.JWT.AccessTokenKey = "local-development-access-token-key-change-before-production"
+	require.ErrorContains(t, cfg.validate(), "示例 JWT")
+	for _, origin := range []string{"invalid", "https://example.com/path", "https://user:pass@example.com"} {
+		cfg = validConfig()
+		cfg.CORS.AllowedOrigins = []string{origin}
+		require.ErrorContains(t, cfg.validate(), "origin")
+	}
+}
+func TestNewAuthAndRedisEnvConfiguration(t *testing.T) {
+	t.Setenv("FOLLOWINGFEED_AUTH_SIGNUP_ENABLED", "false")
+	t.Setenv("FOLLOWINGFEED_REDIS_PASSWORD", "test-only")
+	t.Setenv("FOLLOWINGFEED_REDIS_TLS", "true")
+	var cfg Config
+	require.NoError(t, load(&cfg))
+	assert.False(t, cfg.Auth.SignupEnabled)
+	assert.True(t, cfg.Redis.TLS)
+	assert.Equal(t, "test-only", cfg.Redis.Password)
 }

@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,7 +69,8 @@ func (b *Builder) Build() gin.HandlerFunc {
 		}
 		if limited {
 			ctx.Set("security_event", "rate_limit.exceeded")
-			ctx.AbortWithStatus(http.StatusTooManyRequests)
+			ctx.Header("Retry-After", strconv.Itoa(max(1, int(b.interval.Seconds()+0.999))))
+			ctx.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"code": 4, "msg": "请求过于频繁，请稍后重试", "data": nil})
 			return
 		}
 		ctx.Next()

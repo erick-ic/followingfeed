@@ -33,7 +33,7 @@ var (
 	ErrInvalidClaims  = errors.New("JWT 声明无效") // 令牌声明缺失、无效或与预期身份不一致。
 )
 
-// RedisJWTHandler 负责签发、解析 JWT，并通过 Redis 维护会话注销黑名单。
+// RedisJWTHandler 负责签发、解析 JWT，并通过 Redis 维护有效会话白名单。
 type RedisJWTHandler struct {
 	cmd             redis.Cmdable // 读写 Redis 中的会话注销记录。
 	accessTokenKey  []byte        // 签发和验证访问令牌的 HMAC 密钥。
@@ -69,6 +69,10 @@ type RefreshClaims struct {
 // SetLoginToken 为用户创建新会话，并同时向响应写入访问令牌和刷新令牌。
 func (rj *RedisJWTHandler) SetLoginToken(ctx *gin.Context, uid int64) error {
 	ssid := uuid.New().String()
+	// 先登记会话，写入失败时不得向客户端签发令牌。
+	if err := rj.cmd.Set(ctx.Request.Context(), sessionKey(ssid), "1", refreshTokenLifetime).Err(); err != nil {
+		return fmt.Errorf("登记登录会话失败：%w", err)
+	}
 	err := rj.SetJWTToken(ctx, uid, ssid)
 	if err != nil {
 		return err
@@ -153,42 +157,32 @@ func (rj *RedisJWTHandler) keyFunc(key []byte) jwt.Keyfunc {
 	}
 }
 
-// ClearToken 注销当前会话：清空返回给客户端的令牌，并将当前 SSID 写入 Redis 黑名单。
-// 黑名单记录保留 7 天，与刷新令牌的有效期一致，防止已注销的令牌在过期前再次使用。
+// ClearToken 删除有效会话。键缺失一律拒绝，Redis 数据丢失不会复活旧令牌。
 func (rj *RedisJWTHandler) ClearToken(ctx *gin.Context, ssid string) error {
-	// 清空响应头中的访问令牌，并让浏览器删除 HttpOnly 刷新令牌 Cookie。
-	ctx.Header("X-JWT-Token", "")
-	rj.ClearRefreshToken(ctx)
-
-	// SSID 是会话黑名单键的一部分，为空时不能生成有效的注销记录。
 	if ssid == "" {
 		return fmt.Errorf("%w: SSID 为空", ErrInvalidClaims)
 	}
-
-	// 以 SSID 为键写入注销黑名单；CheckSession 会据此拒绝该会话后续的请求。
-	// Redis 写入失败时将错误交给上层处理。
-	/*
-		ctx：传递请求的取消和超时信号；
-		key：users:ssid:<ssid>，唯一标识当前登录会话；
-		value：空字符串，因为这里只需要判断 Key 是否存在；
-		expiration：与刷新令牌的有效期保持一致。
-	*/
-	return rj.cmd.Set(
-		ctx.Request.Context(),
-		fmt.Sprintf("users:ssid:%s", ssid),
-		"",
-		refreshTokenLifetime,
-	).Err()
+	// 撤销成功后才清 Cookie；依赖故障时客户端仍可重试注销。
+	if err := rj.cmd.Del(ctx.Request.Context(), sessionKey(ssid)).Err(); err != nil {
+		return err
+	}
+	ctx.Header("X-JWT-Token", "")
+	rj.ClearRefreshToken(ctx)
+	return nil
 }
 
-// CheckSession 检查 ssid 对应的登录会话是否已被加入 Redis 注销黑名单。
-func (rj *RedisJWTHandler) CheckSession(ctx context.Context, Ssid string) error {
-	// users:ssid:<ssid> 是注销黑名单：key 存在表示该会话已经退出登录。
-	cnt, err := rj.cmd.Exists(ctx, fmt.Sprintf("users:ssid:%s", Ssid)).Result()
+func sessionKey(ssid string) string { return "users:session:v2:" + ssid }
+
+// CheckSession 要求会话仍明确存在；旧版本黑名单式令牌也会被拒绝。
+func (rj *RedisJWTHandler) CheckSession(ctx context.Context, ssid string) error {
+	if ssid == "" {
+		return ErrSessionRevoked
+	}
+	cnt, err := rj.cmd.Exists(ctx, sessionKey(ssid)).Result()
 	if err != nil {
 		return err
 	}
-	if cnt > 0 {
+	if cnt != 1 {
 		return ErrSessionRevoked
 	}
 	return nil

@@ -134,3 +134,15 @@ func newHealthTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	require.NoError(t, err)
 	return db, sqlMock
 }
+
+func TestEmptyDevelopmentCORSDoesNotPanicOrAllowCrossOrigin(t *testing.T) {
+	server := gin.New()
+	server.Use(handleCors(config.CORSConfig{}))
+	server.GET("/", func(ctx *gin.Context) { ctx.Status(200) })
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Origin", "https://untrusted.example")
+	resp := httptest.NewRecorder()
+	server.ServeHTTP(resp, req)
+	assert.Equal(t, 200, resp.Code)
+	assert.Empty(t, resp.Header().Get("Access-Control-Allow-Origin"))
+}

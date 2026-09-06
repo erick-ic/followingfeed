@@ -4,8 +4,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "format": "prettier --write \"app/**/*.{ts,tsx,css}\" \"components/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"*.{json,mjs}\"",
-    "format:check": "prettier --check \"app/**/*.{ts,tsx,css}\" \"components/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"*.{json,mjs}\""
+    "format": "prettier --write \"app/**/*.{ts,tsx,css}\" \"components/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"*.{json,mjs}\" \"tests/**/*.mjs\"",
+    "format:check": "prettier --check \"app/**/*.{ts,tsx,css}\" \"components/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"*.{json,mjs}\" \"tests/**/*.mjs\"",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@types/node": "^22.0.0",

@@ -53,6 +53,12 @@ func InitGin(
 	// 低频使用的基础设施路由由独立方法负责注册，保持主装配流程简洁。
 	registerHealthRoutes(server, db, redisClient)
 	registerAPIDocs(server, cfg.Swagger.Enabled)
+	server.GET("/api/v1/site", func(ctx *gin.Context) {
+		ctx.Header("Cache-Control", "no-store")
+		ctx.JSON(http.StatusOK, map[string]any{"code": 0, "msg": "success", "data": map[string]bool{
+			"signupEnabled": cfg.Auth.SignupEnabled, "publishingEnabled": cfg.Auth.PublishingEnabled,
+		}})
+	})
 
 	// 各业务 Handler 只负责所属领域的路由，IOC 层负责统一组装。
 	userHdl.RegisterUsersRouters(server)
@@ -89,9 +95,11 @@ func InitMiddlewares(
 			IgnorePaths(livePath, readyPath, openAPIPath).
 			IgnorePathPrefix("/swagger/").
 			Build(),
+		authProtection(cfg.Auth, redisClient),
 		// 使用 HTTP 方法和 Gin 路由模板精确声明公开边界，避免前后缀匹配误放行新路由。
 		// OptionalRoute 允许匿名请求；如果请求主动携带令牌，仍会校验并注入登录态。
 		middleware.NewLoginJWTMiddlewareBuilder(jwtHandler).
+			IgnoreRoute(http.MethodGet, "/api/v1/site").
 			IgnoreRoute(http.MethodGet, livePath).
 			IgnoreRoute(http.MethodGet, readyPath).
 			IgnoreRoute(http.MethodGet, openAPIPath).
@@ -121,6 +129,11 @@ func limitRequestBody(maxBytes int64) gin.HandlerFunc {
 
 // handleCors 根据配置创建跨域中间件，仅允许显式配置的来源访问业务接口。
 func handleCors(cfg config.CORSConfig) gin.HandlerFunc {
+	// 开发配置未声明跨域来源时不发送 CORS 许可头；避免 cors.New 对空来源 panic。
+	// production 的空来源已在配置校验阶段拒绝。
+	if len(cfg.AllowedOrigins) == 0 {
+		return func(ctx *gin.Context) { ctx.Next() }
+	}
 	return cors.New(cors.Config{
 		AllowOrigins: cfg.AllowedOrigins, // 不使用通配符，允许来源由不同环境的配置明确给出。
 		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},

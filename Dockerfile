@@ -13,6 +13,8 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/followingfeed .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
+
 # 运行阶段：Distroless 镜像不包含编译工具和 Shell，减少镜像体积与攻击面。
 FROM gcr.io/distroless/static-debian12:nonroot
 
@@ -21,6 +23,7 @@ WORKDIR /app
 # 只从构建阶段复制运行所需的可执行文件。
 COPY --from=builder /out/followingfeed /app/followingfeed
 COPY --from=builder /out/migrate /app/migrate
+COPY --from=builder /out/healthcheck /app/healthcheck
 
 # Gin 使用发布模式，关闭开发调试输出。
 ENV GIN_MODE=release

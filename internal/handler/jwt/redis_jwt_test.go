@@ -1,6 +1,9 @@
 package jwt
 
 import (
+	"context"
+	"errors"
+	"github.com/redis/go-redis/v9"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -90,11 +93,79 @@ func TestRedisJWTHandlerClearsRefreshCookie(t *testing.T) {
 }
 
 func newTestJWTHandler(env string) *RedisJWTHandler {
-	return NewRedisJWTHandler(nil, config.Config{
+	return NewRedisJWTHandler(&sessionStore{keys: make(map[string]bool)}, config.Config{
 		Env: env,
 		JWT: config.JWTConfig{
 			AccessTokenKey:  "access-token-key-at-least-32-characters",
 			RefreshTokenKey: "refresh-token-key-at-least-32-characters",
 		},
 	}).(*RedisJWTHandler)
+}
+
+// 只模拟会话存储，验证真实签发/校验/注销流程以及数据丢失时的安全边界。
+type sessionStore struct {
+	redis.Cmdable
+	keys map[string]bool
+	err  error
+}
+
+func (s *sessionStore) Set(_ context.Context, key string, _ interface{}, _ time.Duration) *redis.StatusCmd {
+	if s.err == nil {
+		s.keys[key] = true
+	}
+	return redis.NewStatusResult("OK", s.err)
+}
+func (s *sessionStore) Exists(_ context.Context, keys ...string) *redis.IntCmd {
+	var count int64
+	for _, key := range keys {
+		if s.keys[key] {
+			count++
+		}
+	}
+	return redis.NewIntResult(count, s.err)
+}
+func (s *sessionStore) Del(_ context.Context, keys ...string) *redis.IntCmd {
+	if s.err == nil {
+		for _, key := range keys {
+			delete(s.keys, key)
+		}
+	}
+	return redis.NewIntResult(1, s.err)
+}
+func TestSessionLossAndLogoutRejectOldTokens(t *testing.T) {
+	h := newTestJWTHandler("production")
+	store := h.cmd.(*sessionStore)
+	for _, loss := range []string{"logout", "redis-loss"} {
+		t.Run(loss, func(t *testing.T) {
+			resp := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(resp)
+			ctx.Request = httptest.NewRequest("POST", "/api/v1/users/login", nil)
+			require.NoError(t, h.SetLoginToken(ctx, 42))
+			claims, err := h.ParseAccessToken(resp.Header().Get("X-JWT-Token"))
+			require.NoError(t, err)
+			require.NoError(t, h.CheckSession(context.Background(), claims.Ssid))
+			if loss == "logout" {
+				require.NoError(t, h.ClearToken(ctx, claims.Ssid))
+			} else {
+				clear(store.keys)
+			}
+			require.ErrorIs(t, h.CheckSession(context.Background(), claims.Ssid), ErrSessionRevoked)
+		})
+	}
+	store.keys["users:ssid:legacy"] = true
+	require.ErrorIs(t, h.CheckSession(context.Background(), "legacy"), ErrSessionRevoked)
+}
+func TestSessionStoreFailureDoesNotIssueTokensOrPretendLogout(t *testing.T) {
+	h := newTestJWTHandler("production")
+	store := h.cmd.(*sessionStore)
+	store.err = errors.New("unavailable")
+	resp := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(resp)
+	ctx.Request = httptest.NewRequest("POST", "/api/v1/users/login", nil)
+	require.Error(t, h.SetLoginToken(ctx, 42))
+	assert.Empty(t, resp.Header().Get("X-JWT-Token"))
+	assert.Empty(t, resp.Result().Cookies())
+	require.Error(t, h.ClearToken(ctx, "ssid"))
+	assert.Empty(t, resp.Result().Cookies())
+	require.Error(t, h.CheckSession(context.Background(), "ssid"))
 }

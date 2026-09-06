@@ -75,14 +75,34 @@ export class ApiError extends Error {
   }
 }
 
-// fetch 在断网、DNS 失败等情况下会抛出浏览器自带的英文 TypeError。
-// 统一在请求层转换为中文错误，避免各页面直接展示 “Failed to fetch”。
-async function request(input: string, init?: RequestInit): Promise<Response> {
+type BufferedResponse = Pick<Response, "status" | "ok" | "headers"> & { bodyText: string };
+
+// 超时覆盖响应头和正文读取；不自动重试写请求，避免超时后重复发布。
+async function request(input: string, init?: RequestInit): Promise<BufferedResponse> {
+  const controller = new AbortController();
+  const cancel = () => controller.abort(init?.signal?.reason);
+  init?.signal?.addEventListener("abort", cancel, { once: true });
+  if (init?.signal?.aborted) cancel();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 10_000);
   try {
-    // include 允许跨端口开发环境接收和发送后端设置的 HttpOnly 刷新 Cookie。
-    return await fetch(input, { credentials: "include", ...init });
+    const response = await fetch(input, {
+      credentials: "include",
+      ...init,
+      signal: controller.signal,
+    });
+    const bodyText = await response.text();
+    return { status: response.status, ok: response.ok, headers: response.headers, bodyText };
   } catch {
+    if (timedOut) throw new ApiError("请求超时，请稍后重试；提交操作请先确认是否已成功", 0);
+    if (init?.signal?.aborted) throw new ApiError("请求已取消", 0);
     throw new ApiError("网络连接失败，请检查网络后重试", 0);
+  } finally {
+    clearTimeout(timer);
+    init?.signal?.removeEventListener("abort", cancel);
   }
 }
 
@@ -91,8 +111,8 @@ type ApiOptions = {
   retry?: boolean;
 };
 
-async function parseResult<T>(response: Response): Promise<ApiResult<T>> {
-  const text = await response.text();
+async function parseResult<T>(response: BufferedResponse): Promise<ApiResult<T>> {
+  const text = response.bodyText;
   let body: ApiResult<T> | null = null;
 
   if (text) {
@@ -238,9 +258,12 @@ export async function registerRequest(
 export async function logoutRequest() {
   try {
     await api<null>("/users/logout", { method: "POST" }, { auth: true });
-  } finally {
-    clearAuthentication();
+  } catch (cause) {
+    // 已失效的会话无需再次撤销；依赖故障则保留登录态供重试。
+    if (!(cause instanceof ApiError) || cause.status !== 401) throw cause;
   }
+  clearAuthentication();
+  clearCurrentProfileCache();
 }
 
 export async function followUser(userId: number) {

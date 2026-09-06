@@ -303,11 +303,5 @@ func articleID(ctx *gin.Context) (int64, bool) {
 }
 
 func validatePagination(req ListReq) string {
-	if req.Page < 1 || req.PageSize < 1 {
-		return "page 和 pageSize 必须大于 0"
-	}
-	if req.PageSize > 50 {
-		return "pageSize 不能超过 50"
-	}
-	return ""
+	return handler.ValidatePagination(req.Page, req.PageSize)
 }

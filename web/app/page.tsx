@@ -10,39 +10,31 @@ import { ListScrollRestorer } from "../components/list-scroll-restorer";
 import { LocalDateTime } from "../components/local-date-time";
 
 const PAGE_SIZE = 10;
+const MAX_PAGE = 1000;
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
-  const page = Math.max(1, Number((await searchParams).page) || 1);
+  const rawPage = (await searchParams).page;
+  const page = rawPage === undefined ? 1 : Number(rawPage);
+  if (!Number.isSafeInteger(page) || page < 1 || page > MAX_PAGE) {
+    redirect("/");
+  }
   let articles: Article[] = [];
   let hasNextPage = false;
   let totalPages = 1;
   let error = "";
 
   try {
-    let requestedPage = page;
-    while (requestedPage > 1 && articles.length === 0) {
-      const result = await api<PageResult<Article>>(
-        `/pub/list?page=${requestedPage}&pageSize=${PAGE_SIZE}`,
-      );
-      articles = result.items;
-      totalPages = result.totalPages;
-      if (articles.length === 0) requestedPage -= 1;
-    }
-    if (requestedPage !== page) {
-      redirect(`/?page=${requestedPage}`);
-    }
-    if (requestedPage === 1) {
-      const result = await api<PageResult<Article>>(`/pub/list?page=1&pageSize=${PAGE_SIZE}`);
-      articles = result.items;
-      totalPages = result.totalPages;
-    }
-    hasNextPage = requestedPage < totalPages;
+    const result = await api<PageResult<Article>>(`/pub/list?page=${page}&pageSize=${PAGE_SIZE}`);
+    articles = result.items;
+    totalPages = Math.min(MAX_PAGE, Math.max(1, result.totalPages));
+    hasNextPage = page < totalPages;
   } catch (cause) {
     error = cause instanceof Error ? cause.message : "暂时无法加载文章";
   }
 
-  if (!error && page > 1 && articles.length === 0) {
-    redirect(`/?page=${page - 1}`);
+  // redirect 会抛出框架异常，必须放在业务错误捕获之外。
+  if (!error && page > totalPages) {
+    redirect(`/?page=${totalPages}`);
   }
 
   const emptyDescription =

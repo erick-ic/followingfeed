@@ -40,3 +40,10 @@ rate_limit:
 cors:
   allowed_origins:
     - "http://localhost:3000"
+
+auth:
+  signup_enabled: true
+  publishing_enabled: true
+  rate_window: "1m"
+  rate_threshold: 10
+  max_concurrent: 2

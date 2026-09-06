@@ -72,7 +72,7 @@ func (ljb *LoginJWTMiddlewareBuilder) Build() gin.HandlerFunc {
 			ctx.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		// 第二层校验：查询 Redis 中的注销黑名单，确认服务端没有撤销当前会话。
+		// 第二层校验：查询 Redis 中的有效会话白名单，确认会话仍然有效。
 		// 使用标准请求 Context，确保客户端断开或请求超时时能够取消 Redis 操作。
 		err = ljb.jwtHandler.CheckSession(ctx.Request.Context(), claims.Ssid)
 		if err != nil {

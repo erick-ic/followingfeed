@@ -20,7 +20,6 @@ import (
 const articleBiz = "article"
 
 const (
-	maxPageSize            = 50
 	maxArticleTitleRunes   = 200
 	maxArticleContentBytes = 60 * 1024
 )
@@ -484,13 +483,7 @@ func (ah *ArticleHandler) Edit(
 
 // validatePagination 校验列表分页参数范围。
 func validatePagination(req ListReq) string {
-	if req.Page < 1 || req.PageSize < 1 {
-		return "page 和 pageSize 必须大于 0"
-	}
-	if req.PageSize > maxPageSize {
-		return "pageSize 不能超过 50"
-	}
-	return ""
+	return handler.ValidatePagination(req.Page, req.PageSize)
 }
 
 // validateArticleReq 校验文章标题和正文的必填项及长度限制。

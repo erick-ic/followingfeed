@@ -48,14 +48,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    try {
-      await logoutRequest();
-    } finally {
-      clearCurrentProfileCache();
-      setAuthenticated(false);
-      router.push("/");
-      router.refresh();
-    }
+    await logoutRequest();
+    clearCurrentProfileCache();
+    setAuthenticated(false);
+    router.push("/");
+    router.refresh();
   }, [router]);
 
   const value = useMemo(

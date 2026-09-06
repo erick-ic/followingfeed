@@ -42,6 +42,7 @@ function Profile() {
   const [error, setError] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
   const [following, setFollowing] = useState<Follow[]>([]);
   const [followers, setFollowers] = useState<Follow[]>([]);
   const [followError, setFollowError] = useState("");
@@ -121,9 +122,12 @@ function Profile() {
 
   async function confirmLogout() {
     setLoggingOut(true);
+    setLogoutError("");
     try {
       await logout();
       setLogoutOpen(false);
+    } catch (cause) {
+      setLogoutError(cause instanceof Error ? cause.message : "退出失败，请重试");
     } finally {
       setLoggingOut(false);
     }
@@ -286,7 +290,7 @@ function Profile() {
       <ConfirmDialog
         open={logoutOpen}
         title="确认退出登录？"
-        description="退出后需要重新登录才能继续管理、编辑和发布文章。"
+        description={logoutError || "退出后需要重新登录才能继续管理、编辑和发布文章。"}
         confirmLabel="确认退出"
         busyLabel="正在退出…"
         busy={loggingOut}

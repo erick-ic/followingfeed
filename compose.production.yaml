@@ -1,0 +1,163 @@
+# 独立生产配置；不要与本地 docker-compose.yaml 合并。
+# 仅运行预构建镜像，不在 ECS 上编译。资源额度是初始预算，须实机验证。
+name: followingfeed-production
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-api-env: &api-env
+  FOLLOWINGFEED_ENV: production
+  FOLLOWINGFEED_MYSQL_HOST: mysql
+  FOLLOWINGFEED_MYSQL_PORT: "3306"
+  FOLLOWINGFEED_MYSQL_USER: followingfeed
+  FOLLOWINGFEED_MYSQL_PASSWORD: ${FOLLOWINGFEED_MYSQL_PASSWORD:?set a unique database password}
+  FOLLOWINGFEED_MYSQL_DATABASE: followingfeed
+  FOLLOWINGFEED_MYSQL_MAX_OPEN_CONNS: "8"
+  FOLLOWINGFEED_MYSQL_MAX_IDLE_CONNS: "2"
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 512m
+    cpus: 0.50
+    environment:
+      MYSQL_DATABASE: followingfeed
+      MYSQL_USER: followingfeed
+      MYSQL_PASSWORD: ${FOLLOWINGFEED_MYSQL_PASSWORD:?set a unique database password}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    command:
+      - --innodb-buffer-pool-size=134217728
+      - --max-connections=30
+      - --performance-schema=OFF
+      - --tmp-table-size=16777216
+      - --max-heap-table-size=16777216
+      - --binlog-expire-logs-seconds=259200
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7.4.7-alpine
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 96m
+    cpus: 0.10
+    # 不持久化有效会话，避免恢复旧快照复活已撤销会话。
+    command:
+      [
+        "redis-server",
+        "--save",
+        "",
+        "--appendonly",
+        "no",
+        "--maxmemory",
+        "64mb",
+        "--maxmemory-policy",
+        "noeviction",
+      ]
+    tmpfs: ["/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  migrate:
+    image: ${FOLLOWINGFEED_API_IMAGE:?set a versioned API image}
+    entrypoint: ["/app/migrate"]
+    restart: "no"
+    logging: *logging
+    mem_limit: 128m
+    cpus: 0.25
+    environment:
+      <<: *api-env
+      # 必须使用独立 DDL 账号；应用账号在上线前收敛到 SELECT/INSERT/UPDATE/DELETE。
+      FOLLOWINGFEED_MIGRATION_DSN: ${FOLLOWINGFEED_MIGRATION_DSN:?set a separate migration DSN}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  api:
+    image: ${FOLLOWINGFEED_API_IMAGE:?set a versioned API image}
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 128m
+    cpus: 0.35
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    environment:
+      <<: *api-env
+      GOMEMLIMIT: 80MiB
+      GOMAXPROCS: "1"
+      FOLLOWINGFEED_REDIS_ADDR: redis:6379
+      FOLLOWINGFEED_JWT_ACCESS_TOKEN_KEY: ${FOLLOWINGFEED_JWT_ACCESS_TOKEN_KEY:?set a random access key}
+      FOLLOWINGFEED_JWT_REFRESH_TOKEN_KEY: ${FOLLOWINGFEED_JWT_REFRESH_TOKEN_KEY:?set a different random refresh key}
+      FOLLOWINGFEED_CORS_ALLOWED_ORIGINS: ${FOLLOWINGFEED_CORS_ALLOWED_ORIGINS:?set the HTTPS community origin}
+      FOLLOWINGFEED_SERVER_TRUSTED_PROXIES: ${FOLLOWINGFEED_SERVER_TRUSTED_PROXIES:?set actual reverse proxy IP or CIDR}
+      FOLLOWINGFEED_SWAGGER_ENABLED: "false"
+      FOLLOWINGFEED_AUTH_SIGNUP_ENABLED: ${FOLLOWINGFEED_AUTH_SIGNUP_ENABLED:-false}
+      FOLLOWINGFEED_AUTH_PUBLISHING_ENABLED: ${FOLLOWINGFEED_AUTH_PUBLISHING_ENABLED:-false}
+      FOLLOWINGFEED_AUTH_RATE_WINDOW: 1m
+      FOLLOWINGFEED_AUTH_RATE_THRESHOLD: "10"
+      FOLLOWINGFEED_AUTH_MAX_CONCURRENT: "1"
+    ports:
+      - "127.0.0.1:${FOLLOWINGFEED_API_PORT:-18080}:8080"
+    healthcheck:
+      test: ["CMD", "/app/healthcheck"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    image: ${FOLLOWINGFEED_WEB_IMAGE:?set a versioned Web image built with NEXT_PUBLIC_API_BASE=/api/v1}
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 256m
+    cpus: 0.50
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=160
+      INTERNAL_API_BASE: http://api:8080/api/v1
+    ports:
+      - "127.0.0.1:${FOLLOWINGFEED_WEB_PORT:-3100}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health',{signal:AbortSignal.timeout(2500)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  mysql_data:

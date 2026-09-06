@@ -16,7 +16,7 @@ FollowingFeed 是一个使用 Go 与 Next.js 构建的技术内容社区，覆�
 - 关注、取消关注、关注状态、关注列表和粉丝列表；
 - 基于拉模式的关注 Feed；
 - 阅读、点赞、收藏、取消操作及用户收藏列表；
-- Redis 会话黑名单、请求限流、热点缓存和缓存击穿保护；
+- Redis 有效会话白名单、请求限流、热点缓存和缓存击穿保护；
 - MySQL 事务、唯一约束、复合索引和版本化迁移；
 - OpenAPI 3.0、可配置 Swagger UI、健康检查、结构化日志和 Prometheus/Grafana 监控；
 - 单元测试、真实 MySQL 集成测试，以及基于 MySQL/Redis 的 HTTP 端到端测试。
@@ -159,8 +159,8 @@ docker build -t followingfeed-api .
 8.0 容器，先验证迁移，再运行仓储并发测试和查询超时测试。测试使用专用 DSN，不读取开发
 `.env`，完成后会自动删除容器。`make check-migrations` 也使用一次性 MySQL，仅执行迁移检查。
 `make verify` 会执行该迁移检查，并额外执行 Go Vet、前端 lint/格式检查、生产构建和
-Compose 配置检查，因此需要可用的 Docker daemon。需要长期运行的本地 MySQL、Redis 的
-端到端测试显式运行：
+Compose 配置检查，因此需要可用的 Docker daemon。使用一次性 MySQL、Redis 的
+隔离端到端测试显式运行：
 
 ```bash
 make test-e2e
@@ -245,3 +245,13 @@ make migrate-up
 
 这些边界及对应演进方案见 [架构文档](docs/architecture.md)。在完成性能验证前，
 项目不宣称具备经过验证的完整高并发能力。
+
+## 小服务器独立部署
+
+生产配置使用 `compose.production.yaml`，不与本地 Compose 合并；默认仅绑定本机 3100/18080，
+不占用主站 3000，不接入主站数据库。配置、账号初始化与验收步骤见
+[小服务器部署说明](docs/production-small-server.md)。
+
+安全行为变更：Redis 使用有效会话白名单；升级后旧会话失效，Redis 重启后需重新登录。
+生产模板关闭 Redis 快照/AOF，避免恢复旧会话。生产模板默认关闭注册与发布，内部验收后按需开放。
+新增前端回归测试通过 `npm --prefix web test` 执行；完整隔离 HTTP 测试运行 `make test-e2e`。

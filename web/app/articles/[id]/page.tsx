@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { CalendarDays, UserRound } from "lucide-react";
-import { api } from "../../../lib/api";
+import { api, ApiError } from "../../../lib/api";
 import type { Article } from "../../../lib/types";
 import { MarkdownContent } from "../../../components/markdown-content";
 import { FollowButton } from "../../../components/follow-button";
@@ -14,18 +15,20 @@ import { LocalDateTime } from "../../../components/local-date-time";
 
 export default async function ArticlePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  if (!/^[1-9]\d*$/.test(id)) notFound();
   const backLabel = "返回";
   let article: Article;
 
   try {
     article = await api<Article>(`/pub/detail/${id}`);
   } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) notFound();
     const message = cause instanceof Error ? cause.message : "文章暂时无法加载";
     return (
       <div className="reading-shell">
         <DetailScrollTop />
         <div className="error-state">
-          <h1>没有找到这篇文章</h1>
+          <h1>文章暂时无法加载</h1>
           <p>{message}</p>
           <BackButton fallbackLabel={backLabel} className="button secondary small" />
         </div>

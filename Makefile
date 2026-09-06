@@ -53,9 +53,9 @@ test:
 test-integration:
 	./scripts/test-integration.sh
 
-# 运行完整 HTTP 端到端测试，执行前需启动本地 MySQL 和 Redis。
+# 使用一次性 MySQL/Redis 运行完整 HTTP 端到端测试。
 test-e2e:
-	go test -tags=e2e .
+	./scripts/test-e2e.sh
 
 # 在一次性 MySQL 容器的空数据库中执行并验证全部迁移，不使用本地开发数据库。
 check-migrations:
@@ -63,6 +63,7 @@ check-migrations:
 
 # 提交前总检查：单元测试、迁移、Go Vet、前端构建、Lint、格式和 Compose 配置。
 verify: test check-migrations vet web-build
+	npm --prefix web test
 	npm --prefix web run lint
 	npm --prefix web run format:check
 	docker compose config --quiet

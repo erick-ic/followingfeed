@@ -64,14 +64,14 @@ JWT 中间件后依次检查：
 
 1. 签名算法与签名是否有效；
 2. issuer、audience、有效期和用户身份声明是否有效；
-3. Redis 中是否存在 `users:ssid:<ssid>` 注销标记。
+3. Redis 中是否存在 `users:session:v2:<ssid>` 有效会话。
 
 ### 2.2 刷新
 
 ```text
 Browser -> POST /users/refreshToken: 自动携带 HttpOnly Cookie
 Handler -> JWTHandler: 校验刷新令牌
-JWTHandler -> Redis: 检查 SSID 是否已注销
+JWTHandler -> Redis: 检查 SSID 是否仍有效
 JWTHandler -> Client: 签发新的访问令牌，沿用原 SSID
 ```
 
@@ -81,7 +81,8 @@ refresh-token rotation 和重放检测能力。
 
 ### 2.3 退出
 
-退出时把 SSID 写入 Redis 黑名单，TTL 为 7 天，与刷新令牌期限一致。
+登录时登记有效 SSID，TTL 为 7 天；退出时删除该记录，缺失会话一律拒绝。
+部署使用不持久化的专用 Redis；重启清空会话，不能恢复旧会话快照。
 之后使用同一 SSID 的访问令牌和刷新令牌都会被拒绝。该设计支持单会话注销；
 Redis 不可用时认证检查采用失败关闭策略，受保护接口不会绕过会话校验。
 
@@ -225,7 +226,7 @@ MySQL 事务实现强一致。
 
 - 最大 1 MiB 请求体；
 - 可配置 CORS 白名单；
-- JWT 身份校验与 Redis 会话黑名单；
+- JWT 身份校验与 Redis 有效会话白名单；
 - Redis 分布式限流，默认配置为每个客户端 IP 每秒 100 个请求，可按环境调整窗口和阈值；
 - `/health/live` 进程存活检查；
 - `/health/ready` MySQL、Redis 就绪检查。
@@ -234,7 +235,7 @@ MySQL 事务实现强一致。
 路由模板、状态码和耗时等稳定字段；密码、JWT、SSID、请求体和响应体不进入日志。
 缓存降级日志通过请求 Context 继承 `request_id` 与 `user_id`，便于定位同一次请求中的问题。
 超过限流阈值时返回 HTTP 429；限流依赖 Redis 异常时当前返回 HTTP 500。已通过 JWT
-验证但无法读取 Redis 会话黑名单时返回 HTTP 503，不会将依赖故障误报为凭证无效。
+验证但无法读取 Redis 有效会话白名单时返回 HTTP 503，不会将依赖故障误报为凭证无效。
 
 独立管理端口暴露 Prometheus 指标，不经过 JWT 和 Redis 限流。当前指标覆盖 HTTP RED、
 认证、限流、Redis 命令、业务缓存 hit/miss/error、MySQL 操作耗时和连接池、依赖就绪状态、
@@ -257,7 +258,7 @@ P95/P99。Prometheus 基础规则关注实例不可用、5xx、HTTP P95、依赖
 | offset 分页           | API 简单，深分页退化             | 用 `(updated_at, id)` 游标分页         |
 | MySQL 同步互动计数    | 一致性直接，热点行竞争           | 引入事件队列/Redis 聚合和批量落库      |
 | cache-aside           | 降级简单，存在短暂陈旧           | 增加变更事件、重试或可靠失效机制       |
-| JWT + SSID 黑名单     | 支持即时注销，依赖 Redis         | 增加刷新令牌轮换、设备会话管理         |
+| JWT + SSID 白名单     | 支持即时注销，依赖 Redis         | 增加刷新令牌轮换、设备会话管理         |
 | 单实例锁/singleflight | 防止本进程击穿                   | 多实例热点场景采用分布式协调或逻辑过期 |
 
 面试中可以说明已经实现事务幂等、缓存旁路、缓存击穿保护、限流、复合索引和
