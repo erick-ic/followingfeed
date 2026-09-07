@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, CalendarDays, LoaderCircle, UserRound } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AuthGuard } from "../../components/auth-guard";
 import { api } from "../../lib/api";
 import type { Article, PageResult } from "../../lib/types";
@@ -31,7 +31,7 @@ function Feed() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
     setError("");
     void api<PageResult<Article>>(`/feed?page=${page}&pageSize=${PAGE_SIZE}`, {}, { auth: true })
@@ -48,6 +48,10 @@ function Feed() {
       .catch((cause) => setError(cause instanceof Error ? cause.message : "关注动态加载失败"))
       .finally(() => setLoading(false));
   }, [page]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <div className="page-shell">
@@ -69,7 +73,7 @@ function Feed() {
         <div className="error-state">
           <h2>关注动态加载失败</h2>
           <p>{error}</p>
-          <button className="button secondary small" onClick={() => setPage(1)}>
+          <button className="button secondary small" onClick={load}>
             重新加载
           </button>
         </div>

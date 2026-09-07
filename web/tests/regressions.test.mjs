@@ -225,3 +225,127 @@ test("article not found is distinct from upstream failure", async () => {
     /文章暂时无法加载/,
   );
 });
+
+// Minimal hook runner: preserves state and dependency semantics across user-driven renders.
+function retryPage(entry, prefix, api) {
+  const slots = [];
+  let cursor = 0;
+  let effects = [];
+  const changed = (old, next) => !old || next.some((value, i) => !Object.is(value, old[i]));
+  const react = {
+    useState(initial) {
+      const index = cursor++;
+      if (!(index in slots)) slots[index] = initial;
+      return [
+        slots[index],
+        (value) => {
+          slots[index] = typeof value === "function" ? value(slots[index]) : value;
+        },
+      ];
+    },
+    useCallback(fn, deps) {
+      const index = cursor++;
+      if (changed(slots[index]?.deps, deps)) slots[index] = { fn, deps };
+      return slots[index].fn;
+    },
+    useEffect(fn, deps) {
+      const index = cursor++;
+      if (changed(slots[index], deps)) effects.push(fn);
+      slots[index] = deps;
+    },
+  };
+  const mocks = {
+    react,
+    "next/link": { default: "a" },
+    "lucide-react": new Proxy({}, { get: () => "span" }),
+    [prefix + "lib/api"]: { api },
+  };
+  for (const name of [
+    "auth-guard",
+    "confirm-dialog",
+    "interaction-summary",
+    "page-select",
+    "local-date-time",
+    "article-link",
+    "list-scroll-restorer",
+  ]) {
+    mocks[prefix + "components/" + name] = new Proxy({}, { get: () => name });
+  }
+  const Page = load(entry, mocks).default;
+  const Component = Page().props.children.type;
+  return () => {
+    cursor = 0;
+    effects = [];
+    const tree = Component();
+    effects.forEach((fn) => fn());
+    return tree;
+  };
+}
+function findElement(node, predicate) {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findElement(item, predicate);
+      if (found) return found;
+    }
+    return;
+  }
+  if (predicate(node)) return node;
+  return findElement(node.props?.children, predicate);
+}
+const settleRequests = async () => {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+};
+for (const [name, entry, prefix] of [
+  ["feed", "app/feed/page.tsx", "../../"],
+  ["my articles", "app/dashboard/articles/page.tsx", "../../../"],
+]) {
+  for (const failedPage of [1, 2]) {
+    test(`${name} retries failed page ${failedPage} without resetting pagination`, async () => {
+      const calls = [];
+      let failures = 0;
+      const render = retryPage(entry, prefix, async (url) => {
+        calls.push(url);
+        const page = Number(new URL(url, "http://test").searchParams.get("page"));
+        if (page === failedPage && failures++ < 2) throw new Error("请求超时，请稍后重试");
+        const list = {
+          items: [{ id: 1, title: "恢复后的文章", status: 2 }],
+          page,
+          totalPages: 2,
+          total: 2,
+        };
+        return name === "feed" ? list : { list, summary: { draft: 0, published: 2 } };
+      });
+      render();
+      await settleRequests();
+      let tree = render();
+      if (failedPage === 2) {
+        const select = findElement(tree, (n) => n.type === "page-select");
+        assert.ok(select);
+        select.props.onChange(2);
+        render();
+        await settleRequests();
+        tree = render();
+      }
+      for (let retry = 0; retry < 2; retry++) {
+        assert.match(JSON.stringify(tree), /请求超时/);
+        assert.doesNotMatch(JSON.stringify(tree), /还没有文章/);
+        const button = findElement(
+          tree,
+          (n) => n.type === "button" && n.props.children === "重新加载",
+        );
+        assert.ok(button);
+        const before = calls.length;
+        button.props.onClick();
+        tree = render();
+        assert.match(JSON.stringify(tree), /正在加载/);
+        await settleRequests();
+        tree = render();
+        assert.equal(calls.length, before + 1);
+        assert.match(calls.at(-1), new RegExp(`page=${failedPage}&`));
+      }
+      assert.match(JSON.stringify(tree), /恢复后的文章/);
+      assert.doesNotMatch(JSON.stringify(tree), /请求超时/);
+    });
+  }
+}

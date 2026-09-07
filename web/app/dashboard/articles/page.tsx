@@ -41,6 +41,7 @@ function ArticleDashboard() {
   const [publishedCount, setPublishedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState(false);
   const [workingId, setWorkingId] = useState<number | null>(null);
   const [publishTarget, setPublishTarget] = useState<Article | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Article | null>(null);
@@ -48,6 +49,7 @@ function ArticleDashboard() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     setError("");
     try {
       const data = await api<MyArticleListResult>(
@@ -61,6 +63,7 @@ function ArticleDashboard() {
       setDraftCount(data.summary.draft);
       setPublishedCount(data.summary.published);
     } catch (cause) {
+      setLoadError(true);
       setError(cause instanceof Error ? cause.message : "文章列表加载失败");
     } finally {
       setLoading(false);
@@ -165,7 +168,7 @@ function ArticleDashboard() {
         </div>
       </div>
 
-      {error && (
+      {error && !loadError && (
         <p className="form-error" role="alert">
           {error}
         </p>
@@ -175,6 +178,14 @@ function ArticleDashboard() {
         <div className="center-state">
           <LoaderCircle className="spin" size={22} />
           <span>正在加载文章…</span>
+        </div>
+      ) : loadError ? (
+        <div className="error-state" role="alert">
+          <h2>文章列表加载失败</h2>
+          <p>{error}</p>
+          <button className="button secondary small" onClick={() => void load()}>
+            重新加载
+          </button>
         </div>
       ) : articles.length === 0 ? (
         <div className="empty-state">
