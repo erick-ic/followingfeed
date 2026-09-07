@@ -41,7 +41,7 @@ observability-baseline:
 	./scripts/observability/baseline.sh
 
 # 生成可保存的性能报告；NAME 指定报告名称，COMPARE 可指定优化前 result.json。
-# 示例：make observability-report NAME=after COMPARE=docs/performance-records/before/result.json
+# 示例：make observability-report NAME=after COMPARE=.local/performance-records/before/result.json
 observability-report:
 	FOLLOWINGFEED_REPORT_NAME='$(NAME)' FOLLOWINGFEED_REPORT_COMPARE_TO='$(COMPARE)' \
 		./scripts/observability/report.sh

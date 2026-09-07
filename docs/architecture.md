@@ -118,19 +118,25 @@ MySQL Transaction
 当前 Feed 采用拉模式，不维护用户收件箱表：
 
 ```sql
-SELECT publish_articles..., users.nickname
-FROM publish_articles
-JOIN follows
-  ON follows.following_id = publish_articles.author_id
-LEFT JOIN users
-  ON users.id = publish_articles.author_id
-WHERE follows.follower_id = ?
-  AND publish_articles.status = 2
-  AND publish_articles.deleted_at = 0
-ORDER BY publish_articles.updated_at DESC, publish_articles.id DESC
-LIMIT ? OFFSET ?;
+SELECT p.id, p.title,
+       LEFT(CONVERT(p.content USING utf8mb4), 100) AS content,
+       p.author_id, p.status, p.created_at, p.updated_at, p.deleted_at,
+       u.nickname AS author_nickname
+FROM (
+  SELECT pa.id, pa.updated_at
+  FROM publish_articles AS pa
+  JOIN follows AS f ON f.following_id = pa.author_id
+  WHERE f.follower_id = ? AND pa.status = 2 AND pa.deleted_at = 0
+  ORDER BY pa.updated_at DESC, pa.id DESC
+  LIMIT ? OFFSET ?
+) AS selected
+JOIN publish_articles AS p ON p.id = selected.id
+LEFT JOIN users AS u ON u.id = p.author_id
+ORDER BY selected.updated_at DESC, selected.id DESC;
 ```
 
+内层先通过覆盖索引选出当前页 ID，外层只读取该页正文和作者信息，减少排序前的回表。
+候选索引扫描和排序仍存在，不能把 LIMIT 当成只扫描当前页条数。
 这种方案写入简单、关注关系变更立即生效，适合当前项目规模；
 代价是每次读取都需要关联关注关系和公开文章。当前分页使用 offset/limit，
 深分页会扫描并跳过越来越多的行，并可能在连续翻页期间因新文章插入产生重复或遗漏。
@@ -139,6 +145,7 @@ LIMIT ? OFFSET ?;
 
 | 索引                                                              | 服务查询                       |
 | ----------------------------------------------------------------- | ------------------------------ |
+| `articles(author_id, deleted_at, status)`                         | 作者文章状态统计               |
 | `publish_articles(status, deleted_at, updated_at, id)`            | 公开文章列表                   |
 | `publish_articles(author_id, status, deleted_at, updated_at, id)` | 作者文章及 Feed 关联           |
 | `follows(follower_id, created_at, id)`                            | 关注列表、定位当前用户关注关系 |

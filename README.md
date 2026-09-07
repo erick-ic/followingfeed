@@ -246,12 +246,14 @@ make migrate-up
 这些边界及对应演进方案见 [架构文档](docs/architecture.md)。在完成性能验证前，
 项目不宣称具备经过验证的完整高并发能力。
 
-## 小服务器独立部署
+## 生产部署
 
 生产配置使用 `compose.production.yaml`，不与本地 Compose 合并；默认仅绑定本机 3100/18080，
 不占用主站 3000，不接入主站数据库。配置、账号初始化与验收步骤见
-[小服务器部署说明](docs/production-small-server.md)。
+[部署指南](docs/deployment.md)。
 
 安全行为变更：Redis 使用有效会话白名单；升级后旧会话失效，Redis 重启后需重新登录。
 生产模板关闭 Redis 快照/AOF，避免恢复旧会话。生产模板默认关闭注册与发布，内部验收后按需开放。
 新增前端回归测试通过 `npm --prefix web test` 执行；完整隔离 HTTP 测试运行 `make test-e2e`。
+
+文档导航：架构与查询设计见 [architecture.md](docs/architecture.md)，接口契约见 [api.yaml](docs/api.yaml)，通用部署与发布要求见 [deployment.md](docs/deployment.md)，本地性能观测见 [observability.md](docs/observability.md)。

@@ -128,17 +128,19 @@ func (ad *ArticleDAOImpl) GetFeed(
 	limit int,
 ) ([]PublishArticle, error) {
 	var articles []PublishArticle
-	err := ad.db.WithContext(ctx).Model(&PublishArticle{}).
-		Select(publishArticleListSelect).
+	// 先分页索引中的 ID 和时间，再读取正文，避免对全部候选文章回表后排序。
+	selected := ad.db.WithContext(ctx).Model(&PublishArticle{}).
+		Select("publish_articles.id, publish_articles.updated_at").
 		Joins("JOIN follows ON follows.following_id = publish_articles.author_id AND follows.follower_id = ?", uid).
-		Joins("LEFT JOIN users ON users.id = publish_articles.author_id").
-		Where(
-			"publish_articles.status = ? AND publish_articles.deleted_at = 0",
-			domain.ArticleStatusPublished.ToUint8(),
-		).
-		Offset(offset).
-		Limit(limit).
+		Where("publish_articles.status = ? AND publish_articles.deleted_at = 0", domain.ArticleStatusPublished.ToUint8()).
 		Order("publish_articles.updated_at DESC, publish_articles.id DESC").
+		Offset(offset).
+		Limit(limit)
+	err := ad.db.WithContext(ctx).Table("(?) AS selected", selected).
+		Select(publishArticleListSelect).
+		Joins("JOIN publish_articles ON publish_articles.id = selected.id").
+		Joins("LEFT JOIN users ON users.id = publish_articles.author_id").
+		Order("selected.updated_at DESC, selected.id DESC").
 		Find(&articles).Error
 	return articles, err
 }
@@ -211,8 +213,8 @@ func (ad *ArticleDAOImpl) CountByAuthorStatus(
 		Select("status, COUNT(*) AS count").
 		Where("author_id = ? AND deleted_at = 0", uid).
 		Group("status").
-		// Scan 将每一行聚合结果按列名映射为一个 ArticleStatusCount。
-		Scan(&counts).Error
+		// Find 保持 Query 回调链，使统计查询也受查询超时约束。
+		Find(&counts).Error
 	return counts, err
 }
 

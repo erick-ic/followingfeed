@@ -84,8 +84,9 @@ func TestMigrationsAgainstFreshMySQL(t *testing.T) {
 			"uk_users_email": {Unique: true, Columns: []string{"email"}},
 		},
 		"articles": {
-			"PRIMARY":                  {Unique: true, Columns: []string{"id"}},
-			"idx_articles_author_list": {Columns: []string{"author_id", "deleted_at", "updated_at", "id"}},
+			"PRIMARY":                    {Unique: true, Columns: []string{"id"}},
+			"idx_articles_author_status": {Columns: []string{"author_id", "deleted_at", "status"}},
+			"idx_articles_author_list":   {Columns: []string{"author_id", "deleted_at", "updated_at", "id"}},
 		},
 		"publish_articles": {
 			"PRIMARY":                          {Unique: true, Columns: []string{"id"}},

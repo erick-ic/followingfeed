@@ -70,7 +70,7 @@ make observability-report NAME=before-cache-optimization
 ```
 
 命令会完成只读压测、查询 Prometheus，并在
-`docs/performance-records/<时间>-before-cache-optimization/` 中保存：
+`.local/performance-records/<时间>-before-cache-optimization/` 中保存：
 
 - `report.md`：可直接阅读的本次指标与自动检查结论；
 - `result.json`：供后续报告自动对比的结构化数据；
@@ -82,7 +82,7 @@ make observability-report NAME=before-cache-optimization
 ```bash
 make observability-report \
   NAME=after-cache-optimization \
-  COMPARE=docs/performance-records/<优化前目录>/result.json
+  COMPARE=.local/performance-records/<优化前目录>/result.json
 ```
 
 新报告会增加“优化前后对比”表，自动计算相对变化并标记改善、基本持平或退化。

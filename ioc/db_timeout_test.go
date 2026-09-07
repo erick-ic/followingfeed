@@ -3,6 +3,7 @@ package ioc
 import (
 	"context"
 	"database/sql"
+	"followingfeed/internal/repository/dao"
 	"regexp"
 	"testing"
 	"time"
@@ -82,4 +83,34 @@ func newQueryTimeoutTestDB(t *testing.T) (*gorm.DB, *sql.DB, sqlmock.Sqlmock) {
 	}), &gorm.Config{DisableAutomaticPing: true})
 	require.NoError(t, err)
 	return db, sqlDB, mock
+}
+
+// 直接调用业务 DAO，防止查询改用 Scan/Rows 后绕过超时回调。
+func TestArticleReadQueriesKeepTimeout(t *testing.T) {
+	for _, name := range []string{"feed", "status_counts"} {
+		t.Run(name, func(t *testing.T) {
+			db, sqlDB, mock := newQueryTimeoutTestDB(t)
+			t.Cleanup(func() { _ = sqlDB.Close() })
+			plugin := queryTimeoutPlugin{timeout: 50 * time.Millisecond}
+			require.NoError(t, db.Use(plugin))
+			var observed context.Context
+			require.NoError(t, db.Callback().Query().After(plugin.beforeName("query")).Before("gorm:query").Register("test:article_deadline", func(tx *gorm.DB) {
+				observed = tx.Statement.Context
+			}))
+			mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			d := dao.NewGORMArticleDAO(db)
+			var err error
+			if name == "feed" {
+				_, err = d.GetFeed(context.Background(), 1, 0, 10)
+			} else {
+				_, err = d.CountByAuthorStatus(context.Background(), 1)
+			}
+			require.NoError(t, err)
+			require.NotNil(t, observed, "业务查询必须经过超时插件")
+			_, hasDeadline := observed.Deadline()
+			require.True(t, hasDeadline)
+			assert.ErrorIs(t, observed.Err(), context.Canceled)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }

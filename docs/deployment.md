@@ -1,12 +1,11 @@
 # 部署指南
 
-本文以 API 的生产部署为主；前端需单独构建。`docker-compose.yaml` 用于本地演示；
-小服务器独立部署使用 `compose.production.yaml`，步骤见[小服务器部署说明](production-small-server.md)。
+FollowingFeed 包含 API 和 Web 两个应用镜像，从同一 Git 提交构建，使用相同版本号发布。
 
-仓库根目录的 `docker-compose.yaml` 默认只启动 MySQL、迁移任务、Redis、API 和前端。
-Prometheus 和 Grafana 位于可选的 `observability`
-Profile，通过 `make observability-up` 按需启动。生产环境应使用独立依赖和发布流程，
-不直接照搬本地 Compose 配置。
+- `docker-compose.yaml`：本地开发与运行，包含应用、数据库、缓存及可选监控组件。
+- `compose.production.yaml`：生产部署，使用预构建镜像，配置资源限额、健康检查和服务端口。
+
+两份 Compose 配置分别使用，不叠加执行。
 
 ## 1. 准备依赖
 
@@ -69,8 +68,11 @@ JWT 两个密钥必须独立、随机生成且至少 32 个字符。发生泄露
 
 ## 3. 构建并迁移
 
+以下以 Linux amd64 为例；按目标服务器架构调整平台，并将 `<version>` 替换为同一个发布版本号。
+
 ```bash
-docker build -t followingfeed-api:<version> .
+docker buildx build --platform linux/amd64 --load -t followingfeed-api:<version> .
+docker buildx build --platform linux/amd64 --load --build-arg NEXT_PUBLIC_API_BASE=/api/v1 -t followingfeed-web:<version> web
 ```
 
 前端构建时将 `NEXT_PUBLIC_API_BASE` 设为浏览器可访问的公网 API 地址；该值会写入构建产物，
@@ -103,7 +105,7 @@ Redis、JWT 或 CORS；API 运行账号应只保留业务所需的 DML 权限，
 迁移器会保存每个 SQL 文件的 SHA-256 checksum，并在执行前把版本标记为 `dirty`。
 这里的 `dirty` 表示“该迁移没有完整执行成功”。MySQL DDL 中途失败后，迁移器会停止，
 不会提供跳过失败版本或直接修改迁移状态的参数。生产环境应在每次迁移前创建可恢复备份；
-出现 dirty 状态时，回滚本次应用发布、恢复迁移前备份，然后重新执行：
+出现 dirty 状态时停止发布，核对实际结构并制定恢复方案。只有明确授权恢复迁移前备份后，才能在恢复完成的数据库上重新执行：
 
 ```bash
 go run ./cmd/migrate
@@ -135,3 +137,34 @@ API 进程在 `8080` 提供业务接口和健康检查，并在独立的 `8081` 
 - 网关应正确传递 HTTP 429，并区分限流 Redis 故障的 HTTP 500 与会话检查失败的 HTTP 503。
 - HTTPS 由反向代理或云负载均衡器终止。
 - 先执行迁移，再逐步发布 API；发布后检查 `/health/ready`、登录和发布文章流程。
+
+## 6. 独立生产 Compose 配置
+
+`compose.production.yaml` 的项目名为 `followingfeed-production`，使用预构建镜像。
+API/Web 默认仅发布回环端口 18080/3100；MySQL、Redis 不发布宿主机端口。
+迁移器与 API 共用 API 镜像，但迁移器使用独立 DDL 账号，应用账号仅保留业务库的
+SELECT/INSERT/UPDATE/DELETE。反向代理将 `/api/v1/` 原样转发给 API，其他路径转发给 Web。
+可信代理地址与 CORS 来源必须按实际网络配置，不能照搬其他环境。
+
+模板内存限额为 MySQL 512 MiB、Web 256 MiB、API 128 MiB、Redis 96 MiB，
+迁移器另需 128 MiB。这些是初始预算，不是容量保证；发布前需检查主机、同机服务和磁盘余量。
+生产构建应在开发机或 CI 完成，不在资源紧张的应用服务器上编译。
+
+注册与发布默认关闭，可通过环境变量按运营需求开启。专用 Redis 使用有效会话白名单，
+关闭 RDB/AOF；重启将要求重新登录，不能恢复旧会话快照。容器健康检查失败需要人工或
+外部监控处理，`unless-stopped` 不会仅因 unhealthy 自动重启容器。
+
+## 7. 版本发布与回退要求
+
+1. 完成相关测试并提交代码，从干净工作区构建。API/Web 使用相同版本标签和提交；镜像标签不可覆盖已发布版本。
+2. 构建目标服务器架构的两个镜像，API 构建上下文为项目根目录，Web 为 `web/`；Web 的 `NEXT_PUBLIC_API_BASE=/api/v1` 在构建时传入。
+3. 记录 Git 提交、镜像 ID、架构及构建参数。可以将两个镜像用 `docker image save` 合并导出，压缩后生成 SHA-256 校验清单。
+4. 上传后先校验再加载镜像，保留旧镜像。加载镜像不等于更新运行容器。
+5. 发布前保存配置；执行数据库迁移前保存当前数据库备份，必要时停止应用写入。压缩校验不能代替恢复演练。
+6. 更新镜像配置并运行 `config --quiet`，避免输出展开后的密钥。迁移专用 DSN 的读取超时应覆盖预期 DDL 耗时，业务查询超时单独保持约束。
+7. 明确执行 `run --rm --no-deps migrate`，确认成功及迁移记录无 dirty；随后使用 `up -d --no-deps api web` 更新应用。命令均需指定生产环境文件与生产 Compose 文件，且数据库和 Redis 已在运行。
+8. 验收健康检查、登录、文章列表、Feed 分页、错误日志和资源占用；共用服务器时同时核对其他服务响应。
+9. 若数据库兼容旧版本，可恢复发布前镜像引用并只重建 API/Web，保留数据及新增兼容索引。数据库恢复需明确恢复点及覆盖授权，不能自动执行。
+
+不使用 `down -v` 发布，不重建数据卷，不因应用升级重启 Redis/MySQL。
+迁移失败时先核查实际结构及登记状态，不重复执行 DDL 或手动清除 dirty 标记。

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -251,6 +252,45 @@ func TestMySQLArticleDAOFeedPagination(t *testing.T) {
 	require.Len(t, items, 1)
 	assert.Equal(t, first, items[0].Id)
 	assert.NotEqual(t, second, items[0].Id)
+}
+
+// 验证先分页后回表仍保持跨作者排序、可见性过滤及 Unicode 摘要。
+func TestMySQLArticleDAOFeedVisibilityAndOrdering(t *testing.T) {
+	f := newMySQLFixture(t)
+	reader := f.createUser(t, "读者")
+	a := f.createUser(t, "作者甲")
+	b := f.createUser(t, "作者乙")
+	outsider := f.createUser(t, "未关注作者")
+	for _, author := range []int64{a, b} {
+		require.NoError(t, NewFollow(f.db).Insert(f.ctx, reader, author))
+	}
+	old := f.createPublishedArticle(t, a, "旧文", 100)
+	tied1 := f.createPublishedArticle(t, a, "同时间甲", 200)
+	tied2 := f.createPublishedArticle(t, b, "同时间乙", 200)
+	f.createPublishedArticle(t, outsider, "不可见", 500)
+	withdrawn := f.createPublishedArticle(t, a, "撤回", 400)
+	deleted := f.createPublishedArticle(t, b, "删除", 300)
+	require.NoError(t, f.db.Model(&PublishArticle{}).Where("id = ?", withdrawn).Update("status", domain.ArticleStatusPrivate.ToUint8()).Error)
+	require.NoError(t, f.db.Model(&PublishArticle{}).Where("id = ?", deleted).Update("deleted_at", 1).Error)
+	require.NoError(t, f.db.Model(&PublishArticle{}).Where("id = ?", tied2).Update("content", []byte(strings.Repeat("文", 120))).Error)
+	d := NewGORMArticleDAO(f.db)
+	items, err := d.GetFeed(f.ctx, reader, 0, 2)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	assert.Equal(t, tied2, items[0].Id)
+	assert.Equal(t, "作者乙", items[0].AuthorNickname)
+	assert.Equal(t, tied1, items[1].Id)
+	assert.Equal(t, strings.Repeat("文", 100), string(items[0].Content))
+	items, err = d.GetFeed(f.ctx, reader, 2, 2)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, old, items[0].Id)
+	items, err = d.GetFeed(f.ctx, reader, 3, 2)
+	require.NoError(t, err)
+	assert.Empty(t, items)
+	count, err := d.CountFeed(f.ctx, reader)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), count)
 }
 
 func TestMySQLArticleDAOAuthorPagination(t *testing.T) {

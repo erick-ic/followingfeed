@@ -6,7 +6,7 @@ report_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 report_project_root="$(cd "${report_script_dir}/../.." && pwd)"
 report_name="${FOLLOWINGFEED_REPORT_NAME:-baseline}"
 report_compare_to="${FOLLOWINGFEED_REPORT_COMPARE_TO:-}"
-report_root="${FOLLOWINGFEED_REPORT_ROOT:-${report_project_root}/docs/performance-records}"
+report_root="${FOLLOWINGFEED_REPORT_ROOT:-${report_project_root}/.local/performance-records}"
 report_timestamp="$(date '+%Y%m%d-%H%M%S')"
 report_slug="$(printf '%s' "${report_name}" | tr -cs '[:alnum:]_-' '-' | sed 's/^-//; s/-$//')"
 
